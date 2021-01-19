@@ -3,7 +3,6 @@ from mpl_toolkits.mplot3d import proj3d         # For 3D plotting
 import numpy as np                             # For maths
 from scipy import ndimage                       # For image rotations
 
-print(99)
 def generate_tri_pris(n = 100, size_n = 1,pi=1):
     """ 
     Generate triangular prism data (with missing slice)
@@ -106,7 +105,7 @@ def rotate_bulk(P,ax,ay,az):
 
     return P
 
-def plot_plane(ax,v=[0,0,1]):
+def plot_plane(P,ax,v=[0,0,1]):
     x,y,z = v
     y = -y
     s=5
@@ -143,7 +142,7 @@ def plot_plane(ax,v=[0,0,1]):
     ax.set_xticklabels([])
     ax.set_zticklabels([])
     
-def plot_both(P,ax,ay,az,save_path=None):
+def plot_both(X,Y,Z,P,ax,ay,az,save_path=None):
     # plot in 3D for a single tilt
     fig= plt.figure(figsize=(12,6))
     ax1 = fig.add_subplot(1, 2, 1)
@@ -152,7 +151,7 @@ def plot_both(P,ax,ay,az,save_path=None):
     vx,vy,vz = angle_to_vector(ax,ay,az)
     Prot=rotate_bulk(P,ax,ay,az)
     plot_2d(X,Y,Z,Prot,ax=ax1,fig=fig)
-    plot_plane(ax2,v=[vx,vy,vz])
+    plot_plane(Prot,ax2,v=[vx,vy,vz])
 
     title = 'Projected density $(%i^{\circ},%i^{\circ},%i^{\circ})$' % (ax,ay,az)
     ax1.set_title(title,size=14)
@@ -160,3 +159,57 @@ def plot_both(P,ax,ay,az,save_path=None):
     
     if save_path != None:
         plt.savefig(save_path,bbox_inches='tight')
+        
+def angle_to_vector(ax,ay,az):
+    θ = az * np.pi/180 # yaw
+    ϕ = ax * np.pi/180 # pitch
+    ψ = ay * np.pi/180 # roll
+    
+    x = -np.sin(ψ)*np.cos(θ)-np.cos(ψ)*np.sin(ϕ)*np.sin(θ)
+    y = np.sin(ψ)*np.sin(θ)-np.cos(ψ)*np.sin(ϕ)*np.cos(θ)
+    z = np.cos(ψ)*np.cos(ϕ)
+    
+    return x,y,z
+
+def rotation_matrix(ax,ay,az):
+    """ 
+    Generate 3D rotation matrix from rotation angles ax,ay,az 
+    about the x,y,z axes (given in degrees) 
+    (Uses convention of rotating about z, then y, then x)
+    """
+
+    ax = ax * np.pi/180
+    Cx = np.cos(ax)
+    Sx = np.sin(ax)
+    mrotx = np.array([[1,0,0],[0,Cx,-Sx],[0,Sx,Cx]])
+    
+    ay = ay * np.pi/180
+    Cy = np.cos(ay)
+    Sy = np.sin(ay)
+    mroty = np.array([[Cy,0,Sy],[0,1,0],[-Sy,0,Cy]])
+    
+    az = az * np.pi/180
+    Cz = np.cos(az)
+    Sz = np.sin(az)
+    mrotz = np.array([[Cz,-Sz,0],[Sz,Cz,0],[0,0,1]])
+    
+    mrot = mrotz.dot(mroty).dot(mrotx)
+    
+    return mrot
+
+def get_astravec(ax,ay,az):
+    """ Given angles in degrees, return r,d,u,v as a concatenation
+    of four 3-component vectors"""
+    # ray direction r
+    r = np.array(angle_to_vector(ax,ay,az))*-1
+    # centre of detector
+    d = [0,0,0]
+    
+    # 3D rotation matrix
+    mrot = np.array(rotation_matrix(ax,ay,az))
+    # u (det +x)
+    u = mrot.dot([1,0,0])
+    # v (det +y)
+    v = mrot.dot([0,1,0])
+
+    return np.concatenate((r,d,u,v))
