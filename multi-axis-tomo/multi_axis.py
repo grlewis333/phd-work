@@ -200,13 +200,17 @@ def rotation_matrix(ax,ay,az):
 def get_astravec(ax,ay,az):
     """ Given angles in degrees, return r,d,u,v as a concatenation
     of four 3-component vectors"""
-    # ray direction r
-    r = np.array(angle_to_vector(ax,ay,az))*-1
+    # Due to indexing, ay needs reversing for desired behaviour
+    ay = -ay
+    
     # centre of detector
     d = [0,0,0]
     
     # 3D rotation matrix
     mrot = np.array(rotation_matrix(ax,ay,az))
+    
+    # ray direction r
+    r = mrot.dot([0,0,1]) # think if *-1 is necessary
     # u (det +x)
     u = mrot.dot([1,0,0])
     # v (det +y)
