@@ -2,6 +2,9 @@ import matplotlib.pyplot as plt                 # For normal plotting
 from mpl_toolkits.mplot3d import proj3d         # For 3D plotting
 import numpy as np                             # For maths
 from scipy import ndimage                       # For image rotations
+import RegTomoReconMulti as rtr                 # Modified version of Rob's CS code
+import copy
+import astra
 
 def generate_tri_pris(n = 100, size_n = 1,pi=1):
     """ 
@@ -217,3 +220,115 @@ def get_astravec(ax,ay,az):
     v = mrot.dot([0,1,0])
 
     return np.concatenate((r,d,u,v))
+
+def generate_angles(x_tilt = (-70,70,11), y_tilt = None, n_random = 0):
+    """ Return a list of [ax,ay,az] lists, each corresponding to axial
+    rotations applied to [0,0,1] to get a new projection direction.
+    
+    To include tilt series about x or y, 
+    specify _tilt with (min_angle, max_angle, n_angles) in deg for
+    a linear spacing of angles, set to None if not desired. 
+    
+    Add n_random tilt orientations with angle chosen between +-90, 
+    or set to 0 for none."""
+    
+    angles = []
+    ax,ay,az = 0,0,0
+    
+    # x series
+    if x_tilt != None:
+        for ax in np.linspace(x_tilt[0],x_tilt[1],x_tilt[2]):
+            angles.append([ax,ay,az])
+    
+    # y series
+    ax,ay,az = 0,0,0
+    if y_tilt != None:
+        for ay in np.linspace(y_tilt[0],y_tilt[1],y_tilt[2]):
+            angles.append([ax,ay,az])
+    
+    # random series
+    if n_random > 0:
+        for i in range(n_random):
+            as_rand = np.random.rand(3)*180 - 90
+            angles.append(as_rand.tolist())
+    
+    return angles
+
+def generate_proj_data(P,angles):
+    """ Returns projection dataset given phantom P
+    and 3D projection angles list.
+    
+    Output is normalised and reshaped such that the
+    projection slice dimension is in the middle, so as
+    to be compatible with astra."""
+    P_projs = []
+    
+    for [ax,ay,az] in angles:
+        P_rot = rotate_bulk(P,ax,ay,az)
+        P_rot_proj =np.flipud(np.mean(P_rot,axis=2).T)
+        P_projs.append(P_rot_proj)
+        
+    # Prepare projections for reconstruction
+    raw_data = np.array(P_projs)
+    raw_data = raw_data -  raw_data.min()
+    raw_data = raw_data/raw_data.max()
+    raw_data = np.transpose(raw_data,axes=[1,0,2]) # reshape so z is middle column
+        
+    return raw_data
+      
+def generate_vectors(angles):
+    """ Converts list of 3D projection angles into
+    list of astra-compatible projection vectors,
+    with [r,d,u,v] vectors on each row. """
+    vectors = []
+    for [ax,ay,az] in angles:
+        vector = get_astravec(ax,ay,az)
+        vectors.append(vector)
+    
+    return vectors
+
+def generate_reconstruction(raw_data,vectors, algorithm = 'SIRT3D_CUDA', niter=10, weight = 0.01,
+                            balance = 1, steps = 'backtrack'):
+
+    # Astra default algorithms
+    if algorithm in ['SIRT3D_CUDA','FP3D_CUDA','BP3D_CUDA','CGLS3D_CUDA']:
+        # Load data objects into astra C layer
+        proj_geom = astra.create_proj_geom('parallel3d_vec',np.shape(raw_data)[0],np.shape(raw_data)[2],np.array(vectors))
+        projections_id = astra.data3d.create('-sino', proj_geom, raw_data)
+        vol_geom = astra.creators.create_vol_geom(np.shape(raw_data)[0], np.shape(raw_data)[0],
+                                                  np.shape(raw_data)[2])
+        reconstruction_id = astra.data3d.create('-vol', vol_geom, data=0)
+        alg_cfg = astra.astra_dict(algorithm)
+        alg_cfg['ProjectionDataId'] = projections_id
+        alg_cfg['ReconstructionDataId'] = reconstruction_id
+        algorithm_id = astra.algorithm.create(alg_cfg)
+
+        astra.algorithm.run(algorithm_id,iterations=niter)
+        recon = astra.data3d.get(reconstruction_id)
+    
+    # CS TV using RTR
+    if algorithm == 'TV1':
+        data = rtr.tomo_data(raw_data, np.array(vectors), degrees=True,
+                    tilt_axis=0, stack_dim=1)
+
+        vol_shape = (data.shape[0],data.shape[0],data.shape[2])
+        projector = data.getOperator(vol_shape=vol_shape,
+                                    backend='astra',GPU=True)
+        alg = rtr.TV(vol_shape, order=1)
+        
+        recon = alg.run(data=data,op=projector, maxiter=niter, weight=weight,
+                balance=balance, steps=steps,
+                callback=None)
+    
+    return recon
+
+def reorient_reconstruction(r):
+    # Swap columns back to match orientation of phantom
+    r = np.transpose(r,[2,1,0]) # Reverse column order
+    r = r[:,::-1,:] # Reverse the y data
+    r = r -  r.min() # normalise
+    r = r/r.max()
+
+    recon_vector = copy.deepcopy(r)
+    
+    return recon_vector
