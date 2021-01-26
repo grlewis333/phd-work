@@ -263,7 +263,8 @@ def generate_proj_data(P,angles):
     to be compatible with astra."""
     P_projs = []
     
-    for [ax,ay,az] in angles:
+    for i in range(len(angles)):
+        ax,ay,az = angles[i]
         P_rot = rotate_bulk(P,ax,ay,az)
         P_rot_proj =np.flipud(np.mean(P_rot,axis=2).T)
         P_projs.append(P_rot_proj)
@@ -289,7 +290,7 @@ def generate_vectors(angles):
 
 def generate_reconstruction(raw_data,vectors, algorithm = 'SIRT3D_CUDA', niter=10, weight = 0.01,
                             balance = 1, steps = 'backtrack'):
-
+    """ Chooise from 'SIRT3D_CUDA','FP3D_CUDA','BP3D_CUDA','CGLS3D_CUDA' or 'TV1'"""
     # Astra default algorithms
     if algorithm in ['SIRT3D_CUDA','FP3D_CUDA','BP3D_CUDA','CGLS3D_CUDA']:
         # Load data objects into astra C layer
