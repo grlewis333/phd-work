@@ -3,6 +3,7 @@ from mpl_toolkits.mplot3d import proj3d         # For 3D plotting
 import numpy as np                             # For maths
 from scipy import ndimage                       # For image rotations
 import RegTomoReconMulti as rtr                 # Modified version of Rob's CS code
+from scipy import optimize                      # For function minimization
 import copy
 import astra
 
@@ -37,6 +38,180 @@ def generate_tri_pris(n = 100, size_n = 1,pi=1):
             for z in zs:
                 if y < (m1*x+c1) and y > (m2*x + c2) and y < (m3*x + c3) and ((z >-20 and z<-10) or (z>0 and z<40)):
                     p = pi
+                    data.append([x,y,z,p])
+                else:
+                    p = 0
+                    data.append([x,y,z,p])
+
+    # Extract density
+    P = np.take(data,3,axis=1)
+
+    P = P.reshape(len(xs),len(ys),len(zs))
+    
+    return X,Y,Z,P
+
+def generate_sphere(n = 100, size_n = 1,pi=1,c=(0,0,0),r=30):
+    """ Generate sphere of radius r centred at c
+    """
+    # Generate x,y,z value
+    xs = np.linspace(-n/2,n/2,int(n/size_n))
+    ys = np.linspace(-n/2,n/2,int(n/size_n))
+    zs = np.linspace(-n/2,n/2,int(n/size_n))
+    X,Y,Z = np.meshgrid(xs,ys,zs,indexing='ij')
+
+#     c = (0,0,0)
+#     r = 30
+    
+    # Assign density to sphere
+    data = []
+    for x in xs:
+        for y in ys:
+            for z in zs:
+                if (x-c[0])**2 + (y-c[1])**2 + (z-c[2])**2 < r**2:
+                    p = 1
+                    data.append([x,y,z,p])
+
+                else:
+                    p = 0
+                    data.append([x,y,z,p])
+
+    # Extract density
+    P = np.take(data,3,axis=1)
+
+    P = P.reshape(len(xs),len(ys),len(zs))
+    
+    return X,Y,Z,P
+
+def generate_tetrapod(n = 100, size_n = 1,pi=1, r_tet=40,r_cyl = 10):
+    """ Generate a tetrapod centred at (0,0,0), A-D labelled vertices,
+    starting at top and going c/w. AOB is in the xz plane.
+    Length of each leg is r_tet and radius of each leg is r_cyl """
+
+    # Generate x,y,z value
+    xs = np.linspace(-n/2,n/2,int(n/size_n))
+    ys = np.linspace(-n/2,n/2,int(n/size_n))
+    zs = np.linspace(-n/2,n/2,int(n/size_n))
+    X,Y,Z = np.meshgrid(xs,ys,zs,indexing='ij')
+
+    # Tetrahedron with O at centre, A-D labelled vertices starting at top and going c/w. AOB is in the xz plane.
+    r_tet = r_tet # length of each leg of the tetrapod (i.e. length of OA, OB, OC, OD)
+    c = (0,0,0) # origin of tetrapod - note changing this currently doesn't work...
+    h = r_tet * (2/3)**.5 / (3/8)**.5 # height in z of the tetrapod
+    
+    # Calculate tetrahedron vertices
+#     A = (c[0],c[1],c[2]+r_tet)
+#     B = (c[0]+(r_tet**2-(h-r_tet)**2)**.5,c[1],c[2]-(h-r_tet))
+#     mrot = multi_axis.rotation_matrix(0,0,120)
+#     C = np.dot(mrot,B)
+#     mrot = multi_axis.rotation_matrix(0,0,-120)
+#     D = np.dot(mrot,B)
+
+    # Cylinder from centre to top vertex of the tetrahedron
+    r_cyl = r_cyl
+
+    # Assign density to first cylinder
+    data = []
+    for x in xs:
+        for y in ys:
+            for z in zs:
+                if (x-c[0])**2 + (y-c[1])**2 < r_cyl**2 and ((z >c[2] and z<(c[2]+r_tet))):
+                    p = pi
+                    data.append([x,y,z,p])
+                else:
+                    p = 0
+                    data.append([x,y,z,p])
+
+    # Extract density
+    P = np.take(data,3,axis=1)
+    P = P.reshape(len(xs),len(ys),len(zs))
+
+    # Rotate cylinder to get other legs
+    OA = rotate_bulk(P,0,0,0)
+    OB = rotate_bulk(OA,0,120,0)
+    OC = rotate_bulk(OB,0,0,120)
+    OD = rotate_bulk(OB,0,0,-120)
+
+    # Add all together and clip between 0 and assigned density
+    tetrapod = np.clip((OA + OB + OC + OD),0,pi)
+    
+    return X,Y,Z,tetrapod
+
+def generate_pillar_cavities(n = 100, size_n = 1,pi=1,x_len=70,y_len=50,z_len=50,r_cyl=4,depth=25,nx=5,ny=3):
+    """ Generate box of dimensions (x_len,y_len,z_len) with hollow pillars of 'depth' length
+        etched into the top z face. There will be an array of nx x ny pillars, each of radius r_cyl.
+    """
+    # Generate x,y,z value
+    xs = np.linspace(-n/2,n/2,int(n/size_n))
+    ys = np.linspace(-n/2,n/2,int(n/size_n))
+    zs = np.linspace(-n/2,n/2,int(n/size_n))
+    X,Y,Z = np.meshgrid(xs,ys,zs,indexing='ij')
+
+    # Box dimensions
+#     x_len = 70
+#     y_len = 50
+#     z_len = 50
+
+#     # tubes
+#     r_cyl = 4
+#     depth = 25
+#     nx = 5
+#     ny = 3
+    cs = []
+
+    cxs = np.linspace(-x_len/2,x_len/2,num=nx+2)[1:-1]
+    cys = np.linspace(-y_len/2,y_len/2,num=ny+2)[1:-1]
+
+    for cx in cxs:
+        for cy in cys:
+            cs.append((cx,cy))
+
+    # Assign density to box
+    data = []
+    for x in xs:
+        for y in ys:
+            for z in zs:
+                if -x_len/2 < x < x_len/2 and -y_len/2 < y < y_len/2 and -z_len/2 < z < z_len/2:
+                    p = 1
+
+                    for c in cs:
+                        if (x-c[0])**2 + (y-c[1])**2 < r_cyl**2 and z > z_len/2-depth:
+                            p = 0
+
+                    data.append([x,y,z,p])
+
+                else:
+                    p = 0
+                    data.append([x,y,z,p])
+
+    # Extract density
+    P = np.take(data,3,axis=1)
+
+    P = P.reshape(len(xs),len(ys),len(zs))
+    
+    return X,Y,Z,P
+
+def generate_layered_rod(n = 100, size_n = 1,pi=1,r=25,length=80,disc_width = 10):
+    """ Generate cylindrical rod of length 80, with alternating discs every 'disc_width'
+    Rod is aligned along z
+    """
+    # Generate x,y,z value
+    xs = np.linspace(-n/2,n/2,int(n/size_n))
+    ys = np.linspace(-n/2,n/2,int(n/size_n))
+    zs = np.linspace(-n/2,n/2,int(n/size_n))
+    X,Y,Z = np.meshgrid(xs,ys,zs,indexing='ij')
+
+    c = (0,0,0)
+
+    # Assign density to rod
+    data = []
+    for x in xs:
+        for y in ys:
+            for z in zs:
+                if (y-c[1])**2 + (x-c[0])**2 < r**2 and -length/2 < z < length/2 :
+                    p = 1
+                    if np.floor(abs(-length/2-z)/disc_width)%2 == 0:
+                        p = .25
+                        
                     data.append([x,y,z,p])
                 else:
                     p = 0
@@ -221,36 +396,63 @@ def get_astravec(ax,ay,az):
 
     return np.concatenate((r,d,u,v))
 
-def generate_angles(x_tilt = (-70,70,11), y_tilt = None, n_random = 0):
+def generate_angles(mode='x',x_tilt = (-70,70,11), y_tilt = (-70,70,11), rand = (70,30,22)):
     """ Return a list of [ax,ay,az] lists, each corresponding to axial
     rotations applied to [0,0,1] to get a new projection direction.
     
-    To include tilt series about x or y, 
-    specify _tilt with (min_angle, max_angle, n_angles) in deg for
-    a linear spacing of angles, set to None if not desired. 
-    
-    Add n_random tilt orientations with angle chosen between +-90, 
-    or set to 0 for none."""
+    Modes = x, y, random, ab_dual, even, quad"""
     
     angles = []
     ax,ay,az = 0,0,0
     
     # x series
-    if x_tilt != None:
+    if mode=='x' or mode=='dual' or mode=='quad':
         for ax in np.linspace(x_tilt[0],x_tilt[1],x_tilt[2]):
             angles.append([ax,ay,az])
     
     # y series
     ax,ay,az = 0,0,0
-    if y_tilt != None:
+    if mode=='y'or mode=='dual' or mode=='quad':
         for ay in np.linspace(y_tilt[0],y_tilt[1],y_tilt[2]):
             angles.append([ax,ay,az])
     
     # random series
-    if n_random > 0:
-        for i in range(n_random):
-            as_rand = np.random.rand(3)*180 - 90
-            angles.append(as_rand.tolist())
+    if mode=='random':
+        for i in range(rand[2]):
+            ax_rand = np.random.rand()*rand[0]*2 - rand[0]
+            ay_rand = np.random.rand()*rand[1]*2 - rand[1]
+            angles.append([ax_rand,ay_rand,0])
+            
+    # alpha propto beta series
+    if mode=='ab_dual':
+        if x_tilt[2] != y_tilt[2]:
+            print('Must have equal number of x/y proj')
+        ax = np.linspace(x_tilt[0],x_tilt[1],x_tilt[2])
+        ay = np.linspace(y_tilt[0],y_tilt[1],y_tilt[2])
+
+        for i,a in enumerate(ax):
+            angles.append([a,ay[i],0])
+
+        for i,a in enumerate(ax):
+            angles.append([a,-ay[i],0])
+            
+    # even spacing
+    if mode=='even':
+        ax = np.linspace(x_tilt[0],x_tilt[1],x_tilt[2])
+        ay = np.linspace(y_tilt[0],y_tilt[1],y_tilt[2])
+        for x in ax:
+            for y in ay:
+                angles.append([x,y,0])
+                
+    # 4 tilts
+    if mode == 'quad':
+        arots=[]
+        mrot = rotation_matrix(0,0,45)
+        for a in angles:
+            arot = mrot.dot(a)
+            arots.append(arot)
+            
+        angles = np.concatenate((angles,arots))
     
     return angles
 
@@ -333,3 +535,111 @@ def reorient_reconstruction(r):
     recon_vector = copy.deepcopy(r)
     
     return recon_vector
+
+def COD(P,recon):
+    """ Calculate the coefficinet of determination (1 perfect, 0 shit)"""
+    P_mean = np.mean(P)
+    R_mean = np.mean(recon)
+    sumprod = np.sum((P-P_mean)*(recon-R_mean))
+    geom_mean = np.sqrt(np.sum((P-P_mean)**2)*np.sum((recon-R_mean)**2))
+    coeff_norm = sumprod/geom_mean
+    COD = coeff_norm**2
+    
+    return COD
+
+def error_opt(beta,recon,P):
+    a = np.linalg.norm(recon*beta-P)
+    b = np.linalg.norm(P)
+    return a/b
+
+def phantom_error(P,recon,beta=1):
+    """ Calculate normalised error between phantom and reconstruction
+    (0 great, 1 shit) """
+    opt = optimize.minimize(error_opt,1,args=(recon,P))
+    err_phant = opt.fun
+    return err_phant
+
+def projection_error(P,recon,angles,beta=1):
+    """ Calculate normalised error between phantom projections and reconstruction
+    projections (0 great, 1 shit) """
+    true_proj = generate_proj_data(P,angles)
+    recon_proj = generate_proj_data(recon,angles)
+    err_proj = phantom_error(true_proj,recon_proj,1)
+    return err_proj
+
+def noisy(image, noise_typ='gauss',g_var = 0.1, p_sp = 0.004,val_pois = None,sp_var=1):
+    """ Add noise to image with choice from:
+    - 'gauss' for Gaussian noise w/ variance 'g_var'
+    - 's&p' for salt & pepper noise with probability 'p_sp'
+    - 'poisson' for shot noise with avg count of 'val_pois'
+    - 'speckle' for speckle noise w/ variance 'sp_var'"""
+    if noise_typ == "gauss":
+        # INDEPENDENT (ADDITIVE)
+        # Draw random samples from a Gaussian distribution
+        # Add these to the image
+        # Higher variance = more noise
+        row,col,ch= image.shape
+        mean = 0
+        var = g_var
+        sigma = var**0.5
+        gauss = np.random.normal(mean,sigma,(row,col,ch))
+        gauss = gauss.reshape(row,col,ch)
+        noisy = image + gauss
+        return noisy
+    
+    elif noise_typ == "s&p":
+        # INDEPENDENT
+        # Salt & pepper/spike/dropout noise will either
+        # set random pixels to their max (salt) or min (pepper)
+        # Quantified by the % of corrupted pixels
+        row,col,ch = image.shape
+        s_vs_p = 0.5
+        amount = p_sp
+        out = np.copy(image)
+        # Salt mode
+        num_salt = np.ceil(amount * image.size * s_vs_p)
+        coords = [np.random.randint(0, i - 1, int(num_salt))
+              for i in image.shape] # randomly select coordinates
+        out[coords] = np.max(image) # set value to max
+
+        # Pepper mode
+        num_pepper = np.ceil(amount* image.size * (1. - s_vs_p))
+        coords = [np.random.randint(0, i - 1, int(num_pepper))
+              for i in image.shape] # randomly select coordinates
+        out[coords] = np.min(image) # set value to min
+        return out
+    
+    elif noise_typ == "poisson":
+        # DEPENDENT (MULTIPLICATIVE)
+        # Poisson noise or shot noise arises due to the quantised
+        # nature of particle detection.
+        # Each pixel changes from its original value to 
+        # a value taken from a Poisson distrubution with
+        # the same mean (multiplied by vals)
+        # So val can be thought of as the avg no. of electrons
+        # contributing to that pixel of the image (low = noisy)
+        if val_pois == None:
+            vals = len(np.unique(image))
+            vals = 2 ** np.ceil(np.log2(vals))
+        else:
+            vals = val_pois
+            
+        noisy = np.random.poisson(image * vals) / float(vals)
+        return noisy
+    
+    elif noise_typ =="speckle":
+        # DEPENDENT (MULTIPLICATIVE)
+        # Random value multiplications of the image pixels
+        
+        # Generate array in shape of image but with values
+        # drawn from a Gaussian distribution
+        row,col,ch= image.shape
+        mean = 0
+        var = sp_var
+        sigma = var**0.5
+        gauss = np.random.normal(mean,sigma,(row,col,ch))
+        gauss = gauss.reshape(row,col,ch)
+        
+        # Multiply image by dist. and add to image
+        noisy = image + image * gauss
+        return noisy
