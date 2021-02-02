@@ -349,7 +349,7 @@ def angle_to_vector(ax,ay,az):
     
     return x,y,z
 
-def rotation_matrix(ax,ay,az):
+def rotation_matrix(ax,ay,az,intrinsic=True):
     """ 
     Generate 3D rotation matrix from rotation angles ax,ay,az 
     about the x,y,z axes (given in degrees) 
@@ -371,24 +371,30 @@ def rotation_matrix(ax,ay,az):
     Sz = np.sin(az)
     mrotz = np.array([[Cz,-Sz,0],[Sz,Cz,0],[0,0,1]])
     
-    mrot = mrotz.dot(mroty).dot(mrotx)
+    if intrinsic == True:
+        mrot = mrotz.dot(mroty).dot(mrotx)
+    else:
+        # To define mrot in an extrinsic space, matching
+        # our desire for intrinsic rotation, we need
+        # to swap the order of the applied rotations
+        mrot = mrotx.dot(mroty).dot(mrotz)
     
     return mrot
 
 def get_astravec(ax,ay,az):
     """ Given angles in degrees, return r,d,u,v as a concatenation
     of four 3-component vectors"""
-    # Due to indexing, ay needs reversing for desired behaviour
-    ay = -ay
+    # Since we us flipud on y axis, ay needs reversing for desired behaviour
+    ay = -ay 
     
     # centre of detector
     d = [0,0,0]
     
-    # 3D rotation matrix
-    mrot = np.array(rotation_matrix(ax,ay,az))
+    # 3D rotation matrix - EXTRINSIC!
+    mrot = np.array(rotation_matrix(ax,ay,az,intrinsic=False))
     
     # ray direction r
-    r = mrot.dot([0,0,1]) # think if *-1 is necessary
+    r = mrot.dot([0,0,1])*-1 # -1 to match astra definitions
     # u (det +x)
     u = mrot.dot([1,0,0])
     # v (det +y)
@@ -400,7 +406,11 @@ def generate_angles(mode='x',x_tilt = (-70,70,11), y_tilt = (-70,70,11), rand = 
     """ Return a list of [ax,ay,az] lists, each corresponding to axial
     rotations applied to [0,0,1] to get a new projection direction.
     
-    Modes = x, y, random, ab_dual, even, quad"""
+    Modes = x, y, dual, quad, sync, dist, rand
+    
+    x and y will use (_,_,n) tilts. Dual/quad use this many in each series
+    Sync uses x_tilt/y_tilt angles but combines them for 2n tilts.
+    Rand uses (alpha range,beta range,n) as parameters to generate angles"""
     
     angles = []
     ax,ay,az = 0,0,0
@@ -417,14 +427,14 @@ def generate_angles(mode='x',x_tilt = (-70,70,11), y_tilt = (-70,70,11), rand = 
             angles.append([ax,ay,az])
     
     # random series
-    if mode=='random':
+    if mode=='rand':
         for i in range(rand[2]):
             ax_rand = np.random.rand()*rand[0]*2 - rand[0]
             ay_rand = np.random.rand()*rand[1]*2 - rand[1]
             angles.append([ax_rand,ay_rand,0])
             
     # alpha propto beta series
-    if mode=='ab_dual':
+    if mode=='sync':
         if x_tilt[2] != y_tilt[2]:
             print('Must have equal number of x/y proj')
         ax = np.linspace(x_tilt[0],x_tilt[1],x_tilt[2])
@@ -437,7 +447,7 @@ def generate_angles(mode='x',x_tilt = (-70,70,11), y_tilt = (-70,70,11), rand = 
             angles.append([a,-ay[i],0])
             
     # even spacing
-    if mode=='even':
+    if mode=='dist':
         ax = np.linspace(x_tilt[0],x_tilt[1],x_tilt[2])
         ay = np.linspace(y_tilt[0],y_tilt[1],y_tilt[2])
         for x in ax:
@@ -467,15 +477,15 @@ def generate_proj_data(P,angles):
     
     for i in range(len(angles)):
         ax,ay,az = angles[i]
-        P_rot = rotate_bulk(P,ax,ay,az)
-        P_rot_proj =np.flipud(np.mean(P_rot,axis=2).T)
-        P_projs.append(P_rot_proj)
+        P_rot = rotate_bulk(P,ax,ay,az) 
+        P_rot_proj =np.flipud(np.mean(P_rot,axis=2).T) #flip/T match data shape to expectations
+        P_projs.append(P_rot_proj) 
         
     # Prepare projections for reconstruction
     raw_data = np.array(P_projs)
     raw_data = raw_data -  raw_data.min()
     raw_data = raw_data/raw_data.max()
-    raw_data = np.transpose(raw_data,axes=[1,0,2]) # reshape so z is middle column
+    raw_data = np.transpose(raw_data,axes=[1,0,2]) # reshape so proj is middle column
         
     return raw_data
       
