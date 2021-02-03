@@ -4,8 +4,9 @@ import numpy as np                             # For maths
 from scipy import ndimage                       # For image rotations
 import RegTomoReconMulti as rtr                 # Modified version of Rob's CS code
 from scipy import optimize                      # For function minimization
-import copy
-import astra
+import copy                                     # For deepcopy
+import astra                                    # For tomography framework
+import transforms3d                             # For some rotation work
 
 def generate_tri_pris(n = 100, size_n = 1,pi=1):
     """ 
@@ -456,11 +457,9 @@ def generate_angles(mode='x',x_tilt = (-70,70,11), y_tilt = (-70,70,11), rand = 
                 
     # 4 tilts
     if mode == 'quad':
-        arots=[]
-        mrot = rotation_matrix(0,0,45)
+        arots = []
         for a in angles:
-            arot = mrot.dot(a)
-            arots.append(arot)
+            arots.append([a[0],a[1],45])
             
         angles = np.concatenate((angles,arots))
     
@@ -653,3 +652,30 @@ def noisy(image, noise_typ='gauss',g_var = 0.1, p_sp = 0.004,val_pois = None,sp_
         # Multiply image by dist. and add to image
         noisy = image + image * gauss
         return noisy
+    
+def vec_to_ang(v):
+    """ Returns a set of Euler rotations that map [0,0,1] to V
+    Note: This will not be unique, but will be 'an' answer.
+    
+    https://stackoverflow.com/questions/51565760/euler-angles-and-rotation-matrix-from-two-3d-points 
+    It works by first finding the axis of rotation from AxB,
+    then getting the angle with atan(AxB/A.B).
+    It then converts this to a rotation matrix and finally to 
+    Euler angles using another module"""
+    A = np.array([0,0,1])
+    B = np.array(v)
+
+    cross = np.cross(A, B)
+    dot = np.dot(A, B.transpose())
+    angle = np.arctan2(np.linalg.norm(cross), dot)
+    rotation_axes = normalize(cross)
+    rotation_m = transforms3d.axangles.axangle2mat(rotation_axes, angle, True)
+    rotation_angles = transforms3d.euler.mat2euler(rotation_m, 'sxyz')
+    
+    return np.array(rotation_angles)*180/np.pi
+
+def normalize(v):
+    norm=np.linalg.norm(v, ord=1)
+    if norm==0:
+        norm=np.finfo(v.dtype).eps
+    return v/norm
