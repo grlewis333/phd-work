@@ -26,12 +26,12 @@ def read_tif(fpath,scale_bar_val=None,show_cal=False):
         h = im_file.fei_metadata['EBeam']['VFW']
 
         # Open image and crop out scale bar
-        im = cv2.imread(fpath)
+        im = cv2.imread(fpath,0)
         lim = int(np.floor(h/px))
         im_crop = im[:lim,:]
         
         plt.figure(figsize=(18,5))
-        plt.imshow(im[lim:,:])
+        plt.imshow(im[lim:,:],cmap='Greys_r')
         plt.axis('off')
 
         return im_crop, im, px, w, h
@@ -74,9 +74,14 @@ def plot_contours(cnts,im,title=None):
 def extract_contours(im, method = 'blur_fill',plot=False,sobel_clip=.4e7,bin_thresh=60,k_blur=5,k_open=3,k_sobel=11):
     """ Given a filtering method ['blur_fill','sobel'], applies filter and extracts the resulting contours
     Can be plotted if plot = True, parameters can be tuned too."""
+    try:
+        gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    except:
+        gray = im
+        
     if method == 'blur_fill':
         # Filter 1: im -> Gray -> Blur -> Threshold -> Open
-        gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+        #gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (k_blur, k_blur), 0)
         thresh = cv2.threshold(blurred, bin_thresh, 255, cv2.THRESH_BINARY)[1]
         kernel = np.ones((k_open,k_open),np.uint8)
@@ -86,7 +91,7 @@ def extract_contours(im, method = 'blur_fill',plot=False,sobel_clip=.4e7,bin_thr
     
     if method == 'sobel':
         # Filter 2: im -> Gray -> Sobel -> Threshold
-        gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+        #gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
         sobelx = cv2.Sobel(gray,cv2.CV_64F,1,0,ksize=k_sobel)
         sobely = cv2.Sobel(gray,cv2.CV_64F,0,1,ksize=k_sobel)
         sobel = abs(sobelx) + abs(sobely)
@@ -137,7 +142,7 @@ def plot_shapes(shapes,im):
         plt.plot(s[:,0][:][:,0],s[:,0][:][:,1],'o-',color=cols[i%len(cols)],alpha=.6)
         plt.plot([x1,x2],[y1,y2],'o-',color=cols[i%len(cols)],alpha=.6,label=None)
 
-    plt.imshow(im)
+    plt.imshow(im,cmap='Greys_r')
     plt.axis('off')
     
 def fit_circles(cnts):
@@ -162,13 +167,13 @@ def calibrate_radii(radii,px):
         ds.append(d)
     return ds
 
-def plot_circles(im,cnts,centres,radii, ds,errs):
+def plot_circles(im,raw_im,cnts,centres,radii, ds,errs):
     """ Plots circles around each final shape and labels with the size"""
-    fig= plt.figure(figsize=(16,12))
+    fig= plt.figure(figsize=(12,16))
     ax1 = fig.add_subplot(2, 1, 1)
     ax2 = fig.add_subplot(2, 1, 2)
-    ax1.imshow(im)
-    plot_shapes(cnts,im)
+    ax1.imshow(raw_im,cmap='Greys_r')
+    plot_shapes(cnts,raw_im)
     cols = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
     for i in range(len(cnts)):
         circle1 = plt.Circle(centres[i], radii[i],ec=cols[i%len(cols)],fc=(0,0,0,0),lw=2,ls=':')
@@ -253,7 +258,7 @@ def alternate_calibration(fpath,scale_bar_val = None,show_plot=False):
     edges = abs(sobely[:-3,:]).sum(axis=1)
     bar = np.argmax(edges)
     
-    im_raw = cv2.imread(fpath)
+    im_raw = cv2.imread(fpath,0)
     im_crop = im_raw[:bar,:]
     im_bar = im[bar:,:]
     
@@ -368,36 +373,43 @@ def full_count_process(fpath, return_vals = False,
     cents,rads = fit_circles(filtered)
     ds = np.array(calibrate_radii(rads,px))
     errs = ds * poly_approx_thresh # very approximate error estimation...
-    plot_circles(im,filtered,cents,rads,ds,errs)
+    plot_circles(im,raw_im,filtered,cents,rads,ds,errs)
     
     if return_vals == True:
         return ds,errs
     
-def manual_detection(im,max_shapes=10):
+def manual_detection(im,max_shapes=20):
     """ Manually click out the boundary of a shape in the event that auto-filtering fails"""
     swap_pyplot_backend(plot_inline=False)
     # Show image
-    plt.imshow(im)
+    plt.imshow(im,cmap='Greys_r')
     plt.axis('off')
     
     all_points = []
+    all_s = []
     # Get user input
     for i in range(max_shapes):
-        plt.title('Shape %i \n Left click to add (up to 6) points \
+        plt.title('Shape %i \n Left click to add (up to 10) points \
         \n Right click for next shape \
-        \n Middle click to remove a point \
+        \n Middle click to remove a point (Use when zooming) \
         \n Finish by right clicking without adding points' %i,fontsize=8)
-        points = plt.ginput(n=6, show_clicks=True,mouse_stop=3,mouse_pop=2)
+        points = plt.ginput(n=10, show_clicks=True,mouse_stop=3,mouse_pop=2)
         if points == []:
             break
-        all_points.append(points)
+        else:
+            all_points.append(points)
+
+            # Convert points to contour
+            s = np.array(points).reshape((-1,1,2)).astype(np.int32)
+            all_s.append(s)
+
+            # Plot shape
+            x1,x2 = s[:][0,0][0],s[:][-1,0][0]
+            y1,y2 = s[:][0,0][1],s[:][-1,0][1]
+            plt.plot(s[:,0][:][:,0],s[:,0][:][:,1],'o-',color='r',alpha=.6)
+            plt.plot([x1,x2],[y1,y2],'o-',color='r',alpha=.6,label=None)
+        
     plt.close()
-    
-    # Convert points to contour
-    all_s = []
-    for p in all_points:
-        s = np.array(p).reshape((-1,1,2)).astype(np.int32)
-        all_s.append(s)
         
     swap_pyplot_backend(plot_inline=True)
     return all_s
