@@ -137,7 +137,7 @@ def generate_tetrapod(n = 100, size_n = 1,pi=1, r_tet=40,r_cyl = 10):
     
     return X,Y,Z,tetrapod
 
-def generate_pillar_cavities(n = 100, size_n = 1,pi=1,x_len=70,y_len=50,z_len=50,r_cyl=4,depth=25,nx=5,ny=3):
+def generate_pillar_cavities(n = 100, size_n = 1,pi=1,x_len=70,y_len=50,z_len=50,r_cyl=15,depth=25,nx=1,ny=1):
     """ Generate box of dimensions (x_len,y_len,z_len) with hollow pillars of 'depth' length
         etched into the top z face. There will be an array of nx x ny pillars, each of radius r_cyl.
     """
@@ -403,65 +403,112 @@ def get_astravec(ax,ay,az):
 
     return np.concatenate((r,d,u,v))
 
-def generate_angles(mode='x',x_tilt = (-70,70,11), y_tilt = (-70,70,11), rand = (70,30,22)):
+def generate_angles(mode='x',n_tilt = 40, alpha=70,beta=40,gamma=180,dist_n2=5,tilt2='gamma'):
     """ Return a list of [ax,ay,az] lists, each corresponding to axial
     rotations applied to [0,0,1] to get a new projection direction.
     
     Modes = x, y, dual, quad, sync, dist, rand
     
-    x and y will use (_,_,n) tilts. Dual/quad use this many in each series
-    Sync uses x_tilt/y_tilt angles but combines them for 2n tilts.
-    Rand uses (alpha range,beta range,n) as parameters to generate angles"""
+    Specify the +- tilt range of alpha/beta/gamma
+    
+    Say total number of tilts n_tilt
+    
+    For dist, each alpha has 'dist_n2' 'tilt2' projections
+    
+    Specify if the 2nd tilt axis is beta or gamma """
     
     angles = []
     ax,ay,az = 0,0,0
     
     # x series
-    if mode=='x' or mode=='dual' or mode=='quad':
-        for ax in np.linspace(x_tilt[0],x_tilt[1],x_tilt[2]):
+    if mode=='x':
+        for ax in np.linspace(-alpha,alpha,n_tilt):
             angles.append([ax,ay,az])
-    
-    # y series
-    ax,ay,az = 0,0,0
-    if mode=='y'or mode=='dual' or mode=='quad':
-        for ay in np.linspace(y_tilt[0],y_tilt[1],y_tilt[2]):
+            
+    if mode=='y':
+        if tilt2 == 'beta':
+            for ay in np.linspace(-beta,beta,n_tilt):
+                angles.append([ax,ay,az])
+        if tilt2 == 'gamma':
+            az = 90
+            for ax in np.linspace(-alpha,alpha,n_tilt):
+                angles.append([ax,ay,az])
+            
+    if mode=='dual':
+        for ax in np.linspace(-alpha,alpha,n_tilt/2):
             angles.append([ax,ay,az])
+            
+        ax,ay,az = 0,0,0
+        if tilt2 == 'beta':
+            for ay in np.linspace(-beta,beta,n_tilt/2):
+                angles.append([ax,ay,az])
+        if tilt2 == 'gamma':
+            az = 90
+            for ax in np.linspace(-alpha,alpha,n_tilt/2):
+                angles.append([ax,ay,az])
     
-    # random series
-    if mode=='rand':
-        for i in range(rand[2]):
-            ax_rand = np.random.rand()*rand[0]*2 - rand[0]
-            ay_rand = np.random.rand()*rand[1]*2 - rand[1]
-            angles.append([ax_rand,ay_rand,0])
+    if mode=='quad':
+        for ax in np.linspace(-alpha,alpha,n_tilt/4):
+            angles.append([ax,ay,az])
             
-    # alpha propto beta series
-    if mode=='sync':
-        if x_tilt[2] != y_tilt[2]:
-            print('Must have equal number of x/y proj')
-        ax = np.linspace(x_tilt[0],x_tilt[1],x_tilt[2])
-        ay = np.linspace(y_tilt[0],y_tilt[1],y_tilt[2])
-
-        for i,a in enumerate(ax):
-            angles.append([a,ay[i],0])
-
-        for i,a in enumerate(ax):
-            angles.append([a,-ay[i],0])
-            
-    # even spacing
-    if mode=='dist':
-        ax = np.linspace(x_tilt[0],x_tilt[1],x_tilt[2])
-        ay = np.linspace(y_tilt[0],y_tilt[1],y_tilt[2])
-        for x in ax:
-            for y in ay:
-                angles.append([x,y,0])
+        az = 90
+        for ax in np.linspace(-alpha,alpha,n_tilt/4):
+            angles.append([ax,ay,az])
                 
-    # 4 tilts
-    if mode == 'quad':
-        arots = []
-        for a in angles:
-            arots.append([a[0],a[1],45])
+        az = 45
+        for ax in np.linspace(-alpha,alpha,n_tilt/4):
+            angles.append([ax,ay,az])
             
-        angles = np.concatenate((angles,arots))
+        az = -45
+        for ax in np.linspace(-alpha,alpha,n_tilt/4):
+            angles.append([ax,ay,az])
+
+    # random series # g or b
+    if mode=='rand':
+        for i in range(n_tilt):
+            ax_rand = np.random.rand()*alpha*2 - alpha
+            if tilt2 == 'beta':
+                ay_rand = np.random.rand()*beta*2 - beta
+                angles.append([ax_rand,ay_rand,0])
+            if tilt2 == 'gamma':
+                az_rand = np.random.rand()*gamma*2 - gamma
+                angles.append([ax_rand,0,az_rand])
+            
+    # alpha propto beta series # g or b
+    if mode=='sync':
+        if tilt2 == 'beta': 
+            ax = np.linspace(-alpha,alpha,n_tilt/2)
+            ay = np.linspace(-beta,beta,n_tilt/2)
+
+            for i,a in enumerate(ax):
+                angles.append([a,ay[i],0])
+
+            for i,a in enumerate(ax):
+                angles.append([a,-ay[i],0])
+        if tilt2 == 'gamma': 
+            ax = np.linspace(-alpha,alpha,n_tilt/2)
+            az = np.linspace(-gamma,gamma,n_tilt/2)
+
+            for i,a in enumerate(ax):
+                angles.append([a,0,az[i]])
+
+            for i,a in enumerate(ax):
+                angles.append([a,0,-az[i]])
+            
+    # even spacing # g or b
+    if mode=='dist':
+        ax = np.linspace(-alpha,alpha,n_tilt/dist_n2)
+        
+        if tilt2 == 'beta': 
+            ay = np.linspace(-beta,beta,dist_n2)
+            for x in ax:
+                for y in ay:
+                    angles.append([x,y,0])
+        if tilt2 == 'gamma': 
+            az = np.linspace(-gamma,gamma,dist_n2)
+            for x in ax:
+                for z in az:
+                    angles.append([x,0,z])
     
     return angles
 
@@ -679,3 +726,20 @@ def normalize(v):
     if norm==0:
         norm=np.finfo(v.dtype).eps
     return v/norm
+
+def compare_recon_phantom(recon_vector,P,ax=0,ay=0,az=0):
+    """ Plots reconstruction and phantom side by side and prints error metrics """
+    a = rotate_bulk(recon_vector,ax,ay,az)
+
+    fig= plt.figure(figsize=(12,6))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+    ax1.imshow(np.flipud(np.mean(a,axis=2).T))
+    ax2.imshow(np.flipud(np.mean(rotate_bulk(P,ax,ay,az),axis=2).T))
+    ax1.axis('off')
+    ax2.axis('off')
+    plt.tight_layout()
+    ax1.set_title('Reconstruction',fontsize=14)
+    ax2.set_title('Phantom',fontsize=14)
+
+    print('Phantom error: ',phantom_error(P,recon_vector),'COD: ',COD(P,recon_vector))
