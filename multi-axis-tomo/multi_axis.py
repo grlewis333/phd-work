@@ -278,9 +278,9 @@ def rotate_bulk(P,ax,ay,az):
     # Due to indexing, ay needs reversing for desired behaviour
     ay = -ay
     
-    P = ndimage.rotate(P,ax,reshape=False,axes=(1,2))
-    P = ndimage.rotate(P,ay,reshape=False,axes=(2,0))
-    P = ndimage.rotate(P,az,reshape=False,axes=(0,1))
+    P = ndimage.rotate(P,ax,reshape=False,axes=(1,2),order=1)
+    P = ndimage.rotate(P,ay,reshape=False,axes=(2,0),order=1)
+    P = ndimage.rotate(P,az,reshape=False,axes=(0,1),order=1)
 
     return P
 
@@ -403,7 +403,7 @@ def get_astravec(ax,ay,az):
 
     return np.concatenate((r,d,u,v))
 
-def generate_angles(mode='x',n_tilt = 40, alpha=70,beta=40,gamma=180,dist_n2=5,tilt2='gamma'):
+def generate_angles(mode='x',n_tilt = 40, alpha=70,beta=40,gamma=180,dist_n2=8,tilt2='gamma'):
     """ Return a list of [ax,ay,az] lists, each corresponding to axial
     rotations applied to [0,0,1] to get a new projection direction.
     
@@ -430,7 +430,10 @@ def generate_angles(mode='x',n_tilt = 40, alpha=70,beta=40,gamma=180,dist_n2=5,t
             for ay in np.linspace(-beta,beta,n_tilt):
                 angles.append([ax,ay,az])
         if tilt2 == 'gamma':
-            az = 90
+            if az >= 90:
+                az = 90
+            else:
+                az = gamma
             for ax in np.linspace(-alpha,alpha,n_tilt):
                 angles.append([ax,ay,az])
             
@@ -443,25 +446,53 @@ def generate_angles(mode='x',n_tilt = 40, alpha=70,beta=40,gamma=180,dist_n2=5,t
             for ay in np.linspace(-beta,beta,n_tilt/2):
                 angles.append([ax,ay,az])
         if tilt2 == 'gamma':
-            az = 90
+            if gamma >=90:
+                az = 90
+            else:
+                az = gamma
             for ax in np.linspace(-alpha,alpha,n_tilt/2):
                 angles.append([ax,ay,az])
     
     if mode=='quad':
-        for ax in np.linspace(-alpha,alpha,n_tilt/4):
-            angles.append([ax,ay,az])
-            
-        az = 90
-        for ax in np.linspace(-alpha,alpha,n_tilt/4):
-            angles.append([ax,ay,az])
-                
-        az = 45
-        for ax in np.linspace(-alpha,alpha,n_tilt/4):
-            angles.append([ax,ay,az])
-            
-        az = -45
-        for ax in np.linspace(-alpha,alpha,n_tilt/4):
-            angles.append([ax,ay,az])
+        if tilt2 == 'beta':
+            for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                angles.append([ax,ay,az])
+            ax,ay,az = 0,0,0
+            for ay in np.linspace(-beta,beta,n_tilt/4):
+                angles.append([ax,ay,az])
+            ay = beta
+            for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                angles.append([ax,ay,az])
+            ay = -beta
+            for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                angles.append([ax,ay,az])
+                    
+        if tilt2 == 'gamma':
+            if gamma >= 90:
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                    angles.append([ax,ay,az])
+                az = 90
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                    angles.append([ax,ay,az])
+                az = 45
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                    angles.append([ax,ay,az])
+                az = -45
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                        angles.append([ax,ay,az])           
+            else:
+                az = gamma
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                    angles.append([ax,ay,az])
+                az = -gamma
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                    angles.append([ax,ay,az])
+                az = gamma/3
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                    angles.append([ax,ay,az])
+                az = -gamma/3
+                for ax in np.linspace(-alpha,alpha,n_tilt/4):
+                    angles.append([ax,ay,az])
 
     # random series # g or b
     if mode=='rand':
@@ -498,17 +529,25 @@ def generate_angles(mode='x',n_tilt = 40, alpha=70,beta=40,gamma=180,dist_n2=5,t
     # even spacing # g or b
     if mode=='dist':
         ax = np.linspace(-alpha,alpha,n_tilt/dist_n2)
-        
+        if alpha == 90:
+            ax = np.linspace(-90,90,n_tilt/dist_n2+1)
+            ax = ax[::-1]
         if tilt2 == 'beta': 
             ay = np.linspace(-beta,beta,dist_n2)
             for x in ax:
                 for y in ay:
                     angles.append([x,y,0])
         if tilt2 == 'gamma': 
-            az = np.linspace(-gamma,gamma,dist_n2)
-            for x in ax:
-                for z in az:
-                    angles.append([x,0,z])
+            if gamma < 90:
+                az = np.linspace(-gamma,gamma,dist_n2)
+                for x in ax:
+                    for z in az:
+                        angles.append([x,0,z])
+            if gamma >= 90:
+                az = np.linspace(-90,90,dist_n2+1)
+                for x in ax:
+                    for z in az[:-1]:
+                        angles.append([x,0,z])
     
     return angles
 
@@ -547,7 +586,7 @@ def generate_vectors(angles):
     return vectors
 
 def generate_reconstruction(raw_data,vectors, algorithm = 'SIRT3D_CUDA', niter=10, weight = 0.01,
-                            balance = 1, steps = 'backtrack'):
+                            balance = 1, steps = 'backtrack', callback_freq = 0):
     """ Chooise from 'SIRT3D_CUDA','FP3D_CUDA','BP3D_CUDA','CGLS3D_CUDA' or 'TV1'"""
     # Astra default algorithms
     if algorithm in ['SIRT3D_CUDA','FP3D_CUDA','BP3D_CUDA','CGLS3D_CUDA']:
@@ -575,9 +614,15 @@ def generate_reconstruction(raw_data,vectors, algorithm = 'SIRT3D_CUDA', niter=1
                                     backend='astra',GPU=True)
         alg = rtr.TV(vol_shape, order=1)
         
-        recon = alg.run(data=data,op=projector, maxiter=niter, weight=weight,
-                balance=balance, steps=steps,
-                callback=None)
+        if callback_freq == 0:
+            recon = alg.run(data=data,op=projector, maxiter=niter, weight=weight,
+                    balance=balance, steps=steps,
+                    callback=None)
+            
+        if callback_freq != 0:
+            recon = alg.run(data=data,op=projector, maxiter=niter, weight=weight,
+                    balance=balance, steps=steps,callback_freq = callback_freq,
+                    callback=('primal','gap','violation','step'))[0]
     
     return recon
 
@@ -727,7 +772,7 @@ def normalize(v):
         norm=np.finfo(v.dtype).eps
     return v/norm
 
-def compare_recon_phantom(recon_vector,P,ax=0,ay=0,az=0):
+def compare_projection(recon_vector,P,ax=0,ay=0,az=0):
     """ Plots reconstruction and phantom side by side and prints error metrics """
     a = rotate_bulk(recon_vector,ax,ay,az)
 
@@ -743,3 +788,78 @@ def compare_recon_phantom(recon_vector,P,ax=0,ay=0,az=0):
     ax2.set_title('Phantom',fontsize=14)
 
     print('Phantom error: ',phantom_error(P,recon_vector),'COD: ',COD(P,recon_vector))
+    
+def compare_ortho(P,r,ax=0,ay=0,az=0,ix=None,iy=None,iz=None):
+    """ Plot recon orthoslices above phantom orthoslices and print error metrics"""
+    
+    Prot = rotate_bulk(P,ax,ay,az)
+    rrot = rotate_bulk(r,ax,ay,az)
+    
+    fig = plt.figure(figsize=(12,8))
+    ax1 = fig.add_subplot(2,3,1)
+    ax2 = fig.add_subplot(2,3,2)
+    ax3 = fig.add_subplot(2,3,3)
+    ax4 = fig.add_subplot(2,3,4)
+    ax5 = fig.add_subplot(2,3,5)
+    ax6 = fig.add_subplot(2,3,6)
+
+    plot_orthoslices(rrot,axs=[ax1,ax2,ax3],ix=ix,iy=iy,iz=iz)
+    plot_orthoslices(Prot,axs=[ax4,ax5,ax6],ix=ix,iy=iy,iz=iz)
+    
+    ax3.set_title('YZ - Recon',fontsize=15,weight='bold')
+    ax2.set_title('XZ - Recon',fontsize=15,weight='bold')
+    ax1.set_title('XY - Recon',fontsize=15,weight='bold')
+    
+    ax6.set_title('YZ - Phantom',fontsize=15,weight='bold')
+    ax5.set_title('XZ - Phantom',fontsize=15,weight='bold')
+    ax4.set_title('XY - Phantom',fontsize=15,weight='bold')
+    
+    plt.tight_layout()
+    print('Phantom error: ',phantom_error(P,r),'COD: ',COD(P,r))
+    
+def plot_orthoslices(P,ix=None,iy=None,iz=None,axs=None):
+    """ Plot xy,xz,yz orthoslices of a 3d volume
+    Plots central slice by default, but slice can be specified """
+    if axs == None:
+        fig = plt.figure(figsize=(12,4))
+        ax1 = fig.add_subplot(1,3,1)
+        ax2 = fig.add_subplot(1,3,2)
+        ax3 = fig.add_subplot(1,3,3)
+    else:
+        ax1,ax2,ax3 = axs
+
+    sx,sy,sz = np.shape(P)
+    sx2 = int(sx/2)
+    sy2 = int(sy/2)
+    sz2 = int(sz/2)
+    
+    if ix != None:
+        sx2 = ix
+    if iy != None:
+        sy2 = iy
+    if iz != None:
+        sz2 = iz
+
+    ax3.imshow(P[sx2,:,:],cmap='Greys_r')
+    ax2.imshow(P[:,sy2,:],cmap='Greys_r')
+    ax1.imshow(P[:,:,sz2],cmap='Greys_r')
+
+    ax1.axis('off')
+    ax2.axis('off')
+    ax3.axis('off')
+
+    plt.tight_layout()
+
+    ax3.set_title('YZ',fontsize=15,weight='bold')
+    ax2.set_title('XZ',fontsize=15,weight='bold')
+    ax1.set_title('XY',fontsize=15,weight='bold')
+    
+def full_tomo(P,Pn,scheme='x',a=70,b=40,g=180,alg='TV1',tilt2='gamma',n_tilt=40,angles = None,dist_n2=8,niter=300,callback_freq=50,weight=0.01):
+    """ Given a phantom, returns reconstructed volume (and projection data and angles)"""
+    if angles == None:
+        angles = generate_angles(mode=scheme,alpha=a,beta=b,gamma=g,tilt2=tilt2,dist_n2=dist_n2,n_tilt=n_tilt)
+    raw_data = generate_proj_data(Pn,angles)
+    vectors = generate_vectors(angles)
+    recon = generate_reconstruction(raw_data,vectors,algorithm=alg,niter=niter,callback_freq=callback_freq,weight=weight)
+    recon_vector = reorient_reconstruction(recon)
+    return [recon_vector,raw_data,angles]
