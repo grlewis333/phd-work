@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from scipy import ndimage                       # For image rotations
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-def B_phase_calc(MXr,MYr,MZr,ds = 0.1,kx = 0.1,ky = 0.1,kv = 300,Cs = 8000,Msat = 480767.832897,x_res =1,y_res=1,z_res=1):
+def B_phase_calc(MXr,MYr,MZr,ds = 0.1,kx = 0.1,ky = 0.1,kv = 300,Cs = 8000,Msat = 1,x_res =1,y_res=1,z_res=1):
 
     #ds # Defocus step in mm
     #kx # Tikhonov filter radius in x in pixels
@@ -51,7 +51,7 @@ def λ_func(V):
     λ *= 1/(np.sqrt(1+(constants.e*V)/(2*constants.m_e*constants.c**2)))
     return λ
 
-def calculate_B(phase_B):
+def calculate_B(phase_B,z_size=1,y_res=1,x_res=1):
     d_phase = np.gradient(phase_B)
     b_const = (constants.codata.value('mag. flux quantum')/(constants.nano**2))/(np.pi*z_size)
     b_field_x = -b_const*d_phase[0]/y_res
@@ -254,7 +254,7 @@ def rotate_magnetisation(U,V,W,ax=0,ay=0,az=0):
     
     return Ur,Vr,Wr
 
-def plot_phase(Mx,My,Mz,ax=None):
+def plot_phase(Mx,My,Mz,ax=None,vmax=0.01429,vmin=0):
     if ax == None:
         plt.figure(figsize=(9,9))
         ax = plt.gca()
@@ -266,9 +266,16 @@ def plot_phase(Mx,My,Mz,ax=None):
     pu = unwrap_phase(phase_B)
 
     # plot
-    ax.imshow(pu[:,::-1].T,cmap='Greys')
+    a = pu[:,::-1].T
+    im = ax.imshow(a/np.pi+abs(np.min(a/np.pi)),cmap='binary_r',vmax=0.007,vmin=vmin)
     ax.axis('off')
     ax.set_title('Phase image',fontsize=25)
+    
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cbar = plt.colorbar(im,cax=cax)
+    
+    return pu
     
 def omf_to_mag(data):
     """ Extract magnetization in grid array from ubermag 'system' object """
@@ -291,7 +298,7 @@ def omf_to_mag(data):
                             np.reshape(mz,(shape[0],shape[1],shape[2]))
     return Mx,My,Mz
 
-def plot_mag(Mx,My,Mz,direction = 'z',s=1,ax=None):
+def plot_mag(Mx,My,Mz,direction = 'z',s=1,ax=None,title=None):
     if ax == None:
         plt.figure(figsize=(9,9))
         ax = plt.gca()
@@ -310,11 +317,120 @@ def plot_mag(Mx,My,Mz,direction = 'z',s=1,ax=None):
     mmax = np.max((Mx**2+My**2+Mz**2)**0.5)
     im = ax.imshow(M_proj,cmap='seismic',extent=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5),vmin=-mmax,vmax=mmax)
     ax.axis('off')
-    ax.set_title('Projected Magnetisation',fontsize=25)
+    if title == None:
+        title = 'Projected Magnetisation'
+    ax.set_title(title,fontsize=25)
     
     
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
 
     cbar = plt.colorbar(im,cax=cax)
-    cbar.ax.set_ylabel('M%s' %direction ,rotation=0,fontsize=20)
+    cbar.ax.set_ylabel('$M_{\parallel}$',rotation=0,fontsize=20)
+    
+def cart2pol(x, y):
+    """ Convert cartesian to polar coordinates
+    rho = magnitude, phi = angle """
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return(rho, phi)
+
+def plot_rafal(pu,mag_B,b_field_x,b_field_y,ax1=None):
+    s = 5
+    size_arrow = 0.25
+    angle = 0
+    
+    import matplotlib.colors
+    from matplotlib.colors import ListedColormap
+    import matplotlib.patches as patches
+
+    cvals  = [-2., 2]
+    colors = ["black","black"]
+    norm=plt.Normalize(min(cvals),max(cvals))
+    tuples = list(zip(map(norm,cvals), colors))
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list("", tuples)
+    # Get the colormap colors
+    my_cmap = cmap(np.arange(cmap.N))
+    # Set alpha
+    my_cmap[int(0.15*cmap.N):int(0.95*cmap.N),-1] = np.linspace(1, 0, int(0.8*cmap.N+1))
+    my_cmap[int(0.95*cmap.N):,-1] = np.ones_like(my_cmap[int(0.95*cmap.N):,-1])*0
+    # Create new colormap
+    my_cmap = ListedColormap(my_cmap)
+    
+    if ax1 == None:
+        fig, ax1 = plt.subplots(ncols=1, figsize=(8, 8))
+    
+    a = b_field_x
+    x_begin,x_end,y_begin,y_end=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5)
+    
+    # plot B field direction as a colour
+    ax1.imshow(np.arctan2(b_field_y,b_field_x).T,origin='lower', \
+               extent=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5), cmap='hsv')
+
+    # Plot magnitude of B as in black/transparent scale
+    ax1.imshow(mag_B.T,origin='lower', extent=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5),\
+            interpolation='spline16', cmap=my_cmap)
+    #cs = ax1.contour(pu.T,origin='lower',levels=np.pi, extent=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5),interpolation='spline16', alpha = 1,colors='k',ls=10,antialiased=True)
+    #plt.contour(pu, cmap='gray', linewidth=.1)
+
+
+    #c.linewidth=10
+    pa=1000
+    cos_phase = np.cos(pu*pa)
+    # Plot cosine of phase as black/transparent
+    ax1.imshow(cos_phase.T,origin='lower', extent=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5),\
+               interpolation='spline16', cmap=my_cmap)
+
+    #ax1.set_title(r'$\bf{B}$$_\perp$', fontsize=25)
+    ax1.set_xlabel('x', fontsize = 16)
+    ax1.set_ylabel('y', fontsize = 16)
+
+
+
+    #### color wheel
+    
+
+
+
+
+    # Create coordinate space
+    pos = (0.8,-0.8) # x,y position fractionally from -1 to 1
+    wheel_rad = 0.3 # as a fraction of the image width 0 to 1
+
+    x = np.linspace(-1,1,200)
+    y = x
+    X,Y = np.meshgrid(x,y)
+
+
+
+    # Map theta values onto coordinate space 
+    thetas = np.ones_like(X)*0
+    for ix, xx in enumerate(x):
+        for iy, yy in enumerate(y):
+            thetas[ix,iy] = cart2pol(xx+pos[1],yy-pos[0])[1]
+
+    # Plot hsv colormap of angles
+    im1 = ax1.imshow(thetas,cmap='hsv_r', extent=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5))
+
+    # Map circle radii onto xy coordinate space
+    circ = np.ones_like(X)*0
+    for ix, xx in enumerate(x):
+        for iy, yy in enumerate(y):
+            if (xx+pos[1])**2 + (yy-pos[0])**2 < wheel_rad**2:
+                circ[ix,iy] = cart2pol(xx+pos[1],yy-pos[0])[0]
+
+    # Plot circle
+    im2 = ax1.imshow(circ, cmap=my_cmap, extent=(0-.5,np.shape(a[::s,::s])[1]-.5,np.shape(a[::s,::s])[0]-.5,0-.5))
+
+    # Clip to make it circular
+    x_frac = (pos[0] + 1) / 2
+    y_frac = (pos[1] + 1) / 2
+    centre_x = x_begin + x_frac*(x_end-x_begin)
+    centre_y = y_begin + y_frac*(y_end-y_begin)
+    patch = patches.Circle((centre_x, centre_y), transform=ax1.transData, radius=.8)#wheel_rad*(x_end-x_begin)/2-1)
+    im2.set_clip_path(patch)
+    im1.set_clip_path(patch)
+
+    ax1.set_title(r'Colour: $\tan^{-1}(B_\perp^y/ B_\perp^x)$,  Intensity: $\cos(1000 \phi_B)$',fontsize=18)
+
+    ax1.axis('off')
