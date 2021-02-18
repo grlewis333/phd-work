@@ -827,6 +827,9 @@ def plot_orthoslices(P,ix=None,iy=None,iz=None,axs=None):
         ax3 = fig.add_subplot(1,3,3)
     else:
         ax1,ax2,ax3 = axs
+        fig = plt.gcf()
+        
+    pmax, pmin = np.max(P),np.min(P)
 
     sx,sy,sz = np.shape(P)
     sx2 = int(sx/2)
@@ -840,9 +843,11 @@ def plot_orthoslices(P,ix=None,iy=None,iz=None,axs=None):
     if iz != None:
         sz2 = iz
 
-    ax3.imshow(P[sx2,:,:],cmap='Greys_r')
-    ax2.imshow(P[:,sy2,:],cmap='Greys_r')
-    ax1.imshow(P[:,:,sz2],cmap='Greys_r')
+    ax3.imshow(P[sx2,:,:],cmap='Greys_r',vmax=pmax,vmin=pmin)
+    ax2.imshow(P[:,sy2,:],cmap='Greys_r',vmax=pmax,vmin=pmin)
+    ax1.imshow(P[:,:,sz2],cmap='Greys_r',vmax=pmax,vmin=pmin)
+    
+    
 
     ax1.axis('off')
     ax2.axis('off')
@@ -853,6 +858,8 @@ def plot_orthoslices(P,ix=None,iy=None,iz=None,axs=None):
     ax3.set_title('YZ',fontsize=15,weight='bold')
     ax2.set_title('XZ',fontsize=15,weight='bold')
     ax1.set_title('XY',fontsize=15,weight='bold')
+    
+    fig.patch.set_facecolor('0.9')
     
 def full_tomo(P,Pn,scheme='x',a=70,b=40,g=180,alg='TV1',tilt2='gamma',n_tilt=40,angles = None,dist_n2=8,niter=300,callback_freq=50,weight=0.01):
     """ Given a phantom, returns reconstructed volume (and projection data and angles)"""
