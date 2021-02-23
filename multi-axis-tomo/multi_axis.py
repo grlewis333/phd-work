@@ -430,7 +430,7 @@ def generate_angles(mode='x',n_tilt = 40, alpha=70,beta=40,gamma=180,dist_n2=8,t
             for ay in np.linspace(-beta,beta,n_tilt):
                 angles.append([ax,ay,az])
         if tilt2 == 'gamma':
-            if az >= 90:
+            if gamma >= 90:
                 az = 90
             else:
                 az = gamma
