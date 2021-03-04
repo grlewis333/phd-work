@@ -322,12 +322,13 @@ def alternate_calibration(fpath,scale_bar_val = None,show_plot=False):
         plt.plot(xs,ys,'-o')
         
             
-    plt.figure(figsize=(18,5))
-    plt.imshow(im_bar,cmap='Greys')
-    plt.plot([lhs,rhs],[im_bar.shape[0]/2,im_bar.shape[0]/2],'-|',color='r',lw=1)
-    plt.show()
+    
     #plt.pause(1)
     if scale_bar_val == None:
+        plt.figure(figsize=(18,5))
+        plt.imshow(im_bar,cmap='Greys')
+        plt.plot([lhs,rhs],[im_bar.shape[0]/2,im_bar.shape[0]/2],'-|',color='r',lw=1)
+        plt.show()
         scale_bar_val = float(input("Please enter scalebar value in nm: "))
         
     px = scale_bar_val / bar_len
