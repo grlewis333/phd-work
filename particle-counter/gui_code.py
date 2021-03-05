@@ -1,4 +1,5 @@
-from PyQt5 import QtWidgets, uic, QtGui                                                       # GUI functions
+from PyQt5 import QtWidgets, uic, QtGui
+from PyQt5.QtCore import QObject# GUI functions
 import sys                                                                                    # For interacting with computer OS
 from os import walk                                                                           # To get filepaths automatically
 import numpy as np                                                                            # Maths
@@ -83,6 +84,10 @@ class Ui(QtWidgets.QMainWindow):
         self.pushButton_nextimage.clicked.connect(self.plot) 
         self.pushButton_updatescalenm.clicked.connect(self.update_calibration)
         self.pushButton_autoidentify.clicked.connect(self.auto_identify)
+        self.pushButton_updateshapes.clicked.connect(self.remove_shape_row)
+        
+        # Initialise shapes
+        self.shapes = []
         
     def file_input(self):
         """ Connects to file input button
@@ -144,9 +149,11 @@ class Ui(QtWidgets.QMainWindow):
         self.label_statusbar.setText(r'Status: Idle')
         
     def auto_identify(self):
-        print('Starting analysis')
+        """ Check auto identification settings and run searching algorithms """
         self.label_statusbar.setText(r'Status: Analysing image')
-        self.label_statusbar.repaint()
+        self.label_statusbar.repaint() # force status to update
+        
+        # Check settings
         filters = []
         if self.checkBox_f1.isChecked():
             filters.append('blur_fill')
@@ -155,13 +162,63 @@ class Ui(QtWidgets.QMainWindow):
         minsize = self.spinBox_minsize.value()
         maxsize = self.spinBox_maxsize.value()
         
+        # Prepare for new image
         self.figure.clear() # clear old figure
         self.ax = self.figure.add_subplot(111) # create an axis
-        print('Using ' + str(filters) + 'with min %i nm and max %i nm diameters' % (minsize,maxsize))
-        ds,errs = cf.full_count_process(self.im,self.raw_im,self.px,self.w,self.h, self.ax, filters=filters, min_avg_length = minsize, max_avg_length = maxsize)
+        
+        # Extract shapes and plot new images
+        ds,errs,shapes = cf.full_count_process(self.im,self.raw_im,self.px,self.w,self.h, self.ax, filters=filters, min_avg_length = minsize, max_avg_length = maxsize)
         self.plot()
-        print('Finished')
+        
+        # Add shapes to current shapes bar
+        self.add_shapes(shapes)
+        self.shapes = np.concatenate((self.shapes,shapes))
+        
+        # Toggle shape view on
+        self.checkBox_shapetoggle.setChecked(True)
+        
         self.label_statusbar.setText(r'Status: Idle')
+        
+    def add_shapes(self,shapes):
+        """ Adds all shapes to current shapes bar"""
+        current_shapes = len(self.shapes)
+        for i,s in enumerate(shapes):
+            self.add_shape_row(current_shapes+i)
+            
+    def add_shape_row(self,i):
+        """ Adds a new shape at label i"""
+        layout = self.gridLayout_13
+            
+        nlabel = QtWidgets.QLabel('%i' % i)
+        hexbox = QtWidgets.QCheckBox('')
+        rodbox = QtWidgets.QCheckBox('')
+        self.includebox = QtWidgets.QCheckBox('')
+        self.includebox.setChecked(True)
+            
+        layout.addWidget(nlabel)
+        layout.addWidget(hexbox)
+        layout.addWidget(rodbox)
+        layout.addWidget(self.includebox)
+        
+        
+    def remove_shape_row(self):
+        """ Removes any shapes with 'Keep?' unchecked """
+        layout = self.gridLayout_13
+        cs = self.scrollAreaWidgetContents.children()
+        # 8 is position of first keep checkbox
+        # they repeat every 4 items
+        keeps = cs[8::4] 
+        for i,box in enumerate(keeps):
+            if box.checkState() == 0:
+                for j in [0,1,2,3]:
+                    w = cs[8+i*4-j]
+                    layout.removeWidget(w)
+                    w.deleteLater()
+                    w = None
+
+                                        
+        
+        
         
 app = QtWidgets.QApplication(sys.argv) # Create an instance of QtWidgets.QApplication
 window = Ui() # Create an instance of our class

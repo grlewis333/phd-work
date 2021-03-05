@@ -382,7 +382,7 @@ def full_count_process(im,raw_im,px,w,h,ax, return_vals = True,
     plot_circles(im,ax,raw_im,filtered,cents,rads,ds,errs)
     
     if return_vals == True:
-        return ds,errs
+        return ds,errs,filtered
     
 def manual_detection(im,max_shapes=20):
     """ Manually click out the boundary of a shape in the event that auto-filtering fails"""
