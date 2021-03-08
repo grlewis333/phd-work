@@ -224,9 +224,10 @@ def detect_shapes(cs, poly_approx_thresh=0.01):
     
     return shapes
 
-def plot_shapes(shapes,im,ax):
+def plot_shapes(shapes,im,ax,
+               cols = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']):
     """ Plots contour shapes over an image """
-    cols = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+    
     for i,s in enumerate(shapes):
         x1,x2 = s[:][0,0][0],s[:][-1,0][0]
         y1,y2 = s[:][0,0][1],s[:][-1,0][1]
@@ -258,7 +259,7 @@ def calibrate_radii(radii,px):
         ds.append(d)
     return ds
 
-def plot_circles(im,ax,raw_im,cnts,centres,radii, ds,errs):
+def plot_circles(im,ax,raw_im,cnts,centres,radii, ds):
     """ Plots circles around each final shape and labels with the size"""
 #     fig= plt.figure(figsize=(12,16))
 #     ax1 = fig.add_subplot(2, 1, 1)
@@ -273,7 +274,7 @@ def plot_circles(im,ax,raw_im,cnts,centres,radii, ds,errs):
 
     d_str = []
     for i,d in enumerate(ds):
-        d_str.append('%i - %.1f $\pm$ %.1f nm' % (i,d,errs[i]))
+        d_str.append('%i - %.1f nm' % (i,d))
         d_str.append('_nolegend_')
         
     ax.legend(d_str,title='Diameters',bbox_to_anchor=(1.01, .6))
@@ -379,45 +380,42 @@ def full_count_process(im,raw_im,px,w,h,ax, return_vals = True,
     cents,rads = fit_circles(filtered)
     ds = np.array(calibrate_radii(rads,px))
     errs = ds * poly_approx_thresh # very approximate error estimation...
-    plot_circles(im,ax,raw_im,filtered,cents,rads,ds,errs)
+    plot_circles(im,ax,raw_im,filtered,cents,rads,ds)
     
     if return_vals == True:
         return ds,errs,filtered
     
 def manual_detection(im,max_shapes=20):
     """ Manually click out the boundary of a shape in the event that auto-filtering fails"""
-    swap_pyplot_backend(plot_inline=False)
+    #swap_pyplot_backend(plot_inline=False)
     # Show image
-    plt.imshow(im,cmap='Greys_r')
-    plt.axis('off')
+    #plt.imshow(im,cmap='Greys_r')
+    #plt.axis('off')
     
     all_points = []
     all_s = []
     # Get user input
-    for i in range(max_shapes):
-        plt.title('Shape %i \n Left click to add (up to 10) points \
-        \n Right click for next shape \
-        \n Middle click to remove a point (Use when zooming) \
-        \n Finish by right clicking without adding points' %i,fontsize=8)
-        points = plt.ginput(n=10, show_clicks=True,mouse_stop=3,mouse_pop=2)
-        if points == []:
-            break
-        else:
-            all_points.append(points)
-
-            # Convert points to contour
-            s = np.array(points).reshape((-1,1,2)).astype(np.int32)
-            all_s.append(s)
-
-            # Plot shape
-            x1,x2 = s[:][0,0][0],s[:][-1,0][0]
-            y1,y2 = s[:][0,0][1],s[:][-1,0][1]
-            plt.plot(s[:,0][:][:,0],s[:,0][:][:,1],'o-',color='r',alpha=.6)
-            plt.plot([x1,x2],[y1,y2],'o-',color='r',alpha=.6,label=None)
+    points = plt.ginput(n=20, show_clicks=True,mouse_stop=3,mouse_pop=2,timeout=60)
+    if points == []:
+        pass
+    else:
+        # to consistently have shapes compatible with existing structures
+        # the easiest way is to just add 2 shapes every time instead of 1
+        # and make the second shape a copy of the first but with additional point
+        # so that it will be filtered out as an 'identical shape' but 
+        # adjusts the array size to be non-uniform
+        all_points.append(points)
+        points2 = np.copy(points).tolist()
+        points2.append(points[-1])
+        all_points.append(points[-1])
+        # Convert points to contour
+        s = np.array(points).reshape((-1,1,2)).astype(np.int32)
+        all_s.append(s)
         
-    plt.close()
-        
-    swap_pyplot_backend(plot_inline=True)
+        s2 = np.array(points2).reshape((-1,1,2)).astype(np.int32)
+        all_s.append(s2)
+
+    
     return all_s
 
 def swap_pyplot_backend(plot_inline=True):

@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt                                                 
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas              # 'Canvas' widget for inserting pyplot into pyqt
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar      # Toolbar widget to accompany pyplot figure
 import gui_counting_functions as cf                                                               # Custom functions for shape this program
+import types # for scroll
+
 
 # Set fake Windows App ID to trick taskbar into displaying icon
 import ctypes
@@ -16,42 +18,71 @@ ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 # set image background colour to match grey of GUI
 plt.rcParams.update({"figure.facecolor": '#f0f0f0'})
 
-def zoom_factory(self,ax,base_scale = .8):
-    """ Allow zooming with the scroll wheel on pyplot figures 
-        Pass figure axes and a scrolling scale. 
+# def zoom_factory(self,ax,base_scale = .8):
+#     """ Allow zooming with the scroll wheel on pyplot figures 
+#         Pass figure axes and a scrolling scale. 
         
-        Based on https://stackoverflow.com/questions/11551049/matplotlib-plot-zooming-with-scroll-wheel """
-    def zoom_fun(event):
-        # get the current x and y limits
-        cur_xlim = ax.get_xlim()
-        cur_ylim = ax.get_ylim()
-        cur_xrange = (cur_xlim[1] - cur_xlim[0])*.5
-        cur_yrange = (cur_ylim[1] - cur_ylim[0])*.5
-        xdata = event.xdata # get event x location
-        ydata = event.ydata # get event y location
+#         Based on https://stackoverflow.com/questions/11551049/matplotlib-plot-zooming-with-scroll-wheel """
+#     def zoom_fun(event):
+#         # get the current x and y limits
+#         cur_xlim = ax.get_xlim()
+#         cur_ylim = ax.get_ylim()
+#         cur_xrange = (cur_xlim[1] - cur_xlim[0])*.5
+#         cur_yrange = (cur_ylim[1] - cur_ylim[0])*.5
+#         xdata = event.xdata # get event x location
+#         ydata = event.ydata # get event y location
         
-        if event.button == 'up':
-            # deal with zoom in
-            scale_factor = 1/base_scale
-        elif event.button == 'down':
-            # deal with zoom out
-            scale_factor = base_scale
+#         if event.button == 'up':
+#             # deal with zoom in
+#             scale_factor = 1/base_scale
+#         elif event.button == 'down':
+#             # deal with zoom out
+#             scale_factor = base_scale
             
-        # set new limits
-        # zoom such that the cursor stays in the same position
+#         # set new limits
+#         # zoom such that the cursor stays in the same position
+#         ax.figure.canvas.toolbar.push_current() # Ensure toolbar home stays the same
+#         ax.set_xlim([xdata - (xdata-cur_xlim[0]) / scale_factor, xdata + (cur_xlim[1]-xdata) / scale_factor]) 
+#         ax.set_ylim([ydata - (ydata-cur_ylim[0]) / scale_factor, ydata + (cur_ylim[1]-ydata) / scale_factor])
+
+#         self.canvas.draw()  # force re-draw
+
+#     fig = ax.get_figure() # get the figure of interest
+#     # attach the call back
+#     self.canvas.mpl_connect('scroll_event',zoom_fun) #QWheelEvent
+
+#     #return the function
+#     return zoom_fun
+
+def zoom_factory(self,ax,base_scale=10):
+    """ Allow zooming with the scroll wheel on pyplot figures 
+         Pass figure axes and a scrolling scale. 
+         Based on https://stackoverflow.com/questions/11551049/matplotlib-plot-zooming-with-scroll-wheel """
+    
+    def mousewheel_move( event):
+        ax=event.inaxes
+        ax._pan_start = types.SimpleNamespace(
+                lim=ax.viewLim.frozen(),
+                trans=ax.transData.frozen(),
+                trans_inverse=ax.transData.inverted().frozen(),
+                bbox=ax.bbox.frozen(),
+                x=event.x,
+                y=event.y)
         ax.figure.canvas.toolbar.push_current() # Ensure toolbar home stays the same
-        ax.set_xlim([xdata - (xdata-cur_xlim[0]) / scale_factor, xdata + (cur_xlim[1]-xdata) / scale_factor]) 
-        ax.set_ylim([ydata - (ydata-cur_ylim[0]) / scale_factor, ydata + (cur_ylim[1]-ydata) / scale_factor])
-
-        self.canvas.draw()  # force re-draw
-
-    fig = ax.get_figure() # get the figure of interest
-    # attach the call back
-    self.canvas.mpl_connect('scroll_event',zoom_fun) #QWheelEvent
-
-    #return the function
-    return zoom_fun
-
+        
+        # Note using ax.drag_pan is much faster than resetting axis limits
+        if event.button == 'up':
+            ax.drag_pan(3, event.key, event.x+base_scale, event.y+base_scale)
+        else: #event.button == 'down':
+            ax.drag_pan(3, event.key, event.x-base_scale, event.y-base_scale)
+        fig=ax.get_figure()
+        fig.canvas.draw_idle()
+    
+    fig = ax.get_figure()
+    fig.canvas.mpl_connect('scroll_event',mousewheel_move)
+    
+    return mousewheel_move
+        
 class Ui(QtWidgets.QMainWindow):
     """ User interface class """
     def __init__(self):
@@ -85,6 +116,8 @@ class Ui(QtWidgets.QMainWindow):
         self.pushButton_updatescalenm.clicked.connect(self.update_calibration)
         self.pushButton_autoidentify.clicked.connect(self.auto_identify)
         self.pushButton_updateshapes.clicked.connect(self.remove_shape_row)
+        self.pushButton_manualidentify.clicked.connect(self.manualidentify)
+        self.checkBox_shapetoggle.toggled.connect(self.toggle_shapes)
         
         # Initialise shapes
         self.shapes = []
@@ -163,16 +196,35 @@ class Ui(QtWidgets.QMainWindow):
         maxsize = self.spinBox_maxsize.value()
         
         # Prepare for new image
-        self.figure.clear() # clear old figure
-        self.ax = self.figure.add_subplot(111) # create an axis
         
         # Extract shapes and plot new images
         ds,errs,shapes = cf.full_count_process(self.im,self.raw_im,self.px,self.w,self.h, self.ax, filters=filters, min_avg_length = minsize, max_avg_length = maxsize)
-        self.plot()
+        
         
         # Add shapes to current shapes bar
-        self.add_shapes(shapes)
+        # ONLY IF NOT THE SAME AS EXISTING
         self.shapes = np.concatenate((self.shapes,shapes))
+        self.shapes = cf.remove_identical_shapes(self.shapes,threshold=.3)
+        self.figure.clear() # clear old figure
+        self.ax = self.figure.add_subplot(111) # create an axis
+        # Fit circles to shapes and plot
+        cents,rads = cf.fit_circles(self.shapes)
+        ds = np.array(cf.calibrate_radii(rads,self.px))
+        cf.plot_circles(self.im,self.ax,self.raw_im,self.shapes,cents,rads,ds)
+        self.plot()
+        
+        # Remove all rows
+        layout = self.gridLayout_13
+        cs = self.scrollAreaWidgetContents.children()
+        for i,w in enumerate(cs):
+            if i > 4:
+                layout.removeWidget(w)
+                w.deleteLater()
+                w = None
+        
+        # Add rows for shapes still there
+        for i,s in enumerate(self.shapes):
+            self.add_shape_row(i)
         
         # Toggle shape view on
         self.checkBox_shapetoggle.setChecked(True)
@@ -207,17 +259,106 @@ class Ui(QtWidgets.QMainWindow):
         cs = self.scrollAreaWidgetContents.children()
         # 8 is position of first keep checkbox
         # they repeat every 4 items
+        print(np.shape(self.shapes))
         keeps = cs[8::4] 
+        to_delete = []
         for i,box in enumerate(keeps):
-            if box.checkState() == 0:
-                for j in [0,1,2,3]:
-                    w = cs[8+i*4-j]
-                    layout.removeWidget(w)
-                    w.deleteLater()
-                    w = None
-
-                                        
+            if box.checkState() == 0: # if box is unchecked
+                # Remove from shapes list
+                to_delete.append(i)
+                        
+        if len(self.shapes) > 0:
+            self.shapes = np.delete(self.shapes,to_delete,axis=0)
         
+        # Remove all rows
+        cs = self.scrollAreaWidgetContents.children()
+        for i,w in enumerate(cs):
+            if i > 4:
+                layout.removeWidget(w)
+                w.deleteLater()
+                w = None
+        
+        # Add rows for shapes still there
+        for i,s in enumerate(self.shapes):
+            self.add_shape_row(i)
+
+        self.checkBox_shapetoggle.setChecked(True)
+        
+        # plot with shapes
+        self.figure.clear() # clear old figure
+        self.ax = self.figure.add_subplot(111) # create an axis
+        # Fit circles to shapes and plot
+        
+        print(np.shape(self.shapes))
+#         self.shapes = self.shapes.tolist()
+#         self.shapes = np.array(self.shapes)
+        cents,rads = cf.fit_circles(self.shapes)
+        ds = np.array(cf.calibrate_radii(rads,self.px))
+        cf.plot_circles(self.im,self.ax,self.raw_im,self.shapes,cents,rads,ds)
+        self.plot() # plot axis
+        
+    def toggle_shapes(self):
+        """ Switch between showing/not showing shape outlines over image """
+        if self.checkBox_shapetoggle.isChecked():
+            # plot with shapes
+            self.figure.clear() # clear old figure
+            self.ax = self.figure.add_subplot(111) # create an axis
+            # Fit circles to shapes and plot
+            cents,rads = cf.fit_circles(self.shapes)
+            ds = np.array(cf.calibrate_radii(rads,self.px))
+            cf.plot_circles(self.im,self.ax,self.raw_im,self.shapes,cents,rads,ds)
+            self.plot() # plot axis
+            
+            
+        if self.checkBox_shapetoggle.isChecked() == False:
+            # plot without shapes
+            self.figure.clear() # clear old figure
+            self.ax = self.figure.add_subplot(111) # create an axis
+            self.ax.imshow(self.raw_im,cmap='Greys_r') # add image to axis
+            self.plot() # plot axis
+            
+    def manualidentify(self):
+        self.label_statusbar.setText(r'Status: Add points manually')
+        self.figure.clear() # clear old figure
+        self.ax = self.figure.add_subplot(111) # create an axis
+        self.ax.imshow(self.raw_im,cmap='Greys_r') # add image to axis
+        cf.plot_shapes(self.shapes,self.raw_im,self.ax,cols=['dodgerblue'])
+        self.plot()
+        
+        # Get new shapes from user input
+        new_s = cf.manual_detection(self.raw_im)
+        
+        # add to existing shapes
+        self.shapes = np.concatenate((self.shapes,new_s))
+        
+        #remove identical shapes
+        self.shapes = cf.remove_identical_shapes(self.shapes,threshold=.3)
+        
+        #plot
+        self.figure.clear() # clear old figure
+        self.ax = self.figure.add_subplot(111) # create an axis
+        # Fit circles to shapes and plot
+        cents,rads = cf.fit_circles(self.shapes)
+        ds = np.array(cf.calibrate_radii(rads,self.px))
+        cf.plot_circles(self.im,self.ax,self.raw_im,self.shapes,cents,rads,ds)
+        self.plot()
+        
+        # Adjust rows
+        layout = self.gridLayout_13
+        cs = self.scrollAreaWidgetContents.children()
+        for i,w in enumerate(cs):
+            if i > 4:
+                layout.removeWidget(w)
+                w.deleteLater()
+                w = None
+        # Add rows for shapes still there
+        for i,s in enumerate(self.shapes):
+            self.add_shape_row(i)
+            
+        # Toggle shape view on
+        self.checkBox_shapetoggle.setChecked(True)
+    
+        self.label_statusbar.setText(r'Status: Idle')    
         
         
 app = QtWidgets.QApplication(sys.argv) # Create an instance of QtWidgets.QApplication
