@@ -454,6 +454,53 @@ class Ui(QtWidgets.QMainWindow):
             self.label_statusbar.setText(r'Status: Idle')
         
         except:
+            self.label_statusbar.setText(r'Status: Choosing output file')
+
+            # Get filepath from file explorer
+            files_types = "CSV (*.csv)"
+            default_name = datetime.today().strftime('%Y-%m-%d') + '.csv'
+            self.fpath_out, _ = QtWidgets.QFileDialog.getSaveFileName(None, 'Choose output filepath', default_name, filter = files_types, options=QtWidgets.QFileDialog.DontConfirmOverwrite)
+
+
+            # Get selected folder
+            fpath = self.fpath_out
+            split = fpath.split(sep='/')
+            folder = ''
+            for i in split[:-1]:
+                folder += i + '/'
+
+            _, _, fnames = next(walk(folder))
+
+
+            if split[-1] in fnames:
+                # file already exists
+                name = split[-1].split(sep='.')[0]
+                try:
+                    name.split(sep='_HEX')[1]
+                    name = name.split(sep='_HEX')[0]
+                except:
+                    name.split(sep='_ROD')[1]
+                    name = name.split(sep='_ROD')[0]
+                self.fpath_hex = folder+name+'_HEX.csv'
+                self.fpath_rod = folder+name+'_ROD.csv'
+
+            else:
+                # create file
+                name = split[-1].split(sep='.')[0] # name without suffix
+                self.fpath_hex = folder+name+'_HEX.csv'
+                self.fpath_rod = folder+name+'_ROD.csv'
+                with open(self.fpath_hex, 'w', newline='') as csvfile:
+                    spamwriter = csv.writer(csvfile, delimiter=',',
+                                            quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                    spamwriter.writerow(['Size (hex) / nm'] + ['fpath'])
+
+                with open(self.fpath_rod, 'w', newline='') as csvfile:
+                    spamwriter = csv.writer(csvfile, delimiter=',',
+                                            quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                    spamwriter.writerow(['Size (rod) / nm'] + ['Filepath'])
+
+            self.label_output_path.setText(folder+name+'_XXX.csv')
+            self.label_statusbar.setText(r'Status: Idle')
             self.label_statusbar.setText(r'Status: Error')
         
     def add_to_file(self):
