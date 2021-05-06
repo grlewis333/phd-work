@@ -5,8 +5,12 @@ from scipy import ndimage                       # For image rotations
 import RegTomoReconMulti as rtr                 # Modified version of Rob's CS code
 from scipy import optimize                      # For function minimization
 import copy                                     # For deepcopy
-import astra                                    # For tomography framework
-import transforms3d                             # For some rotation work
+try:
+    import astra                                    # For tomography framework
+    import transforms3d                             # For some rotation work
+except:
+    print('Astra import failed')
+
 
 def generate_tri_pris(n = 100, size_n = 1,pi=1):
     """ 
