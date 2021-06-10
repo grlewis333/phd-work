@@ -11,6 +11,10 @@ try:
 except:
     print('Astra import failed')
 
+from scipy import constants  
+import matplotlib.patches as patches
+import matplotlib
+from matplotlib.colors import ListedColormap
 
 def generate_tri_pris(n = 100, size_n = 1,pi=1):
     """ 
@@ -874,3 +878,913 @@ def full_tomo(P,Pn,scheme='x',a=70,b=40,g=180,alg='TV1',tilt2='gamma',n_tilt=40,
     recon = generate_reconstruction(raw_data,vectors,algorithm=alg,niter=niter,callback_freq=callback_freq,weight=weight)
     recon_vector = reorient_reconstruction(recon)
     return [recon_vector,raw_data,angles]
+
+
+### magnetic stuff starts
+
+def convertmag_T_Am(M_T):
+    """ Enter 'equivalent' magnetisation in Tesla
+    for a conversion to A/m.
+    Can also input common materials as string, e.g. 
+    'cobalt' """
+    if M_T == 'cobalt':
+        M_Am = 1435860
+        
+    else:
+        M_Am = M_T / (4*np.pi*1e-7)
+        
+    return M_Am
+
+
+
+class Magnetic_Phantom():
+    """ Class for creating magnetic phantoms """
+
+    def sphere(rad_m = 10*1e-9, Ms_Am = 797700, plan_rot=0, bbox_length_m = 100*1e-9, bbox_length_px = 100):
+        """ Creates uniformly magnetised sphere
+            rad_m : Radius in metres
+            Ms_Am : Magnetisation in A/m
+            plan_rot : Direction of magnetisation, rotated in degrees ac/w from +x
+            bbox_length_m : Length in metres of one side of the bounding box
+            bbox_length_px : Length in pixels of one side of the bounding box """
+        # Initialise bounding box parameters
+        p1 = (0,0,0)
+        p2 = (bbox_length_m,bbox_length_m,bbox_length_m)
+        n = (bbox_length_px,bbox_length_px,bbox_length_px)
+        mesh_params = [p1,p2,n]
+        res = bbox_length_m / bbox_length_px # resolution in m per px 
+        ci = int(bbox_length_px/2) # index of bbox centre
+        
+        # Initialise magnetisation arrays
+        mx = np.linspace(0,bbox_length_m,num=bbox_length_px) * 0
+        my,mz = mx,mx
+        MX, MY, MZ = np.meshgrid(mx, my, mz, indexing='ij')
+
+        # Assign magnetisation
+        for i,a in enumerate(MX):
+            for j,b in enumerate(a):
+                for k,c in enumerate(b):
+                    if (i-ci)**2 + (j-ci)**2 + (k-ci)**2 < (rad_m/res)**2:
+                        MX[i,j,k] = np.cos(plan_rot*np.pi/180)*Ms_Am
+                        MY[i,j,k] = np.sin(plan_rot*np.pi/180)*Ms_Am
+        
+        return MX,MY,MZ, mesh_params
+    
+    def rectangle(lx_m = 80*1e-9,ly_m = 30*1e-9, lz_m = 20*1e-9, Ms_Am = 797700, 
+                  plan_rot=0, p2 = (100*1e-9,100*1e-9,100*1e-9), n=(100,100,100)):
+        """ Creates uniformly magnetised rectangle
+            l_m = length of rectangle in metres
+            Ms_Am : Magnetisation in A/m
+            plan_rot : Direction of magnetisation, rotated in degrees ac/w from +x
+            bbox_length_m : Length in metres of one side of the bounding box
+            bbox_length_px : Length in pixels of one side of the bounding box """
+        # Initialise bounding box parameters
+        p1 = (0,0,0)
+        mesh_params = [p1,p2,n]
+        resx = p2[0]/n[0] # resolution in m per px 
+        resy = p2[1]/n[1] # resolution in m per px 
+        resz = p2[2]/n[2] # resolution in m per px 
+        cix = int(n[0]/2) # index of bbox centre
+        ciy = int(n[1]/2) # index of bbox centre
+        ciz = int(n[2]/2) # index of bbox centre
+
+        # Initialise magnetisation arrays
+        mx = np.linspace(0,p2[0],num=n[0]) * 0
+        my = np.linspace(0,p2[1],num=n[1]) * 0
+        mz = np.linspace(0,p2[2],num=n[2]) * 0
+        MX, MY, MZ = np.meshgrid(mx, my, mz, indexing='ij')
+
+        # Assign magnetisation
+        for i,a in enumerate(MX):
+            for j,b in enumerate(a):
+                for k,c in enumerate(b):
+                    if cix-.5*lx_m/resx < i < cix+.5*lx_m/resx and \
+                       ciy-.5*ly_m/resy < j < ciy+.5*ly_m/resy and \
+                       ciz-.5*lz_m/resz < k < ciz+.5*lz_m/resz:
+                        MX[i,j,k] = np.cos(plan_rot*np.pi/180)*Ms_Am
+                        MY[i,j,k] = np.sin(plan_rot*np.pi/180)*Ms_Am
+
+        return MX,MY,MZ, mesh_params
+    
+    def disc_vortex(rad_m = 30*1e-9, lz_m = 20*1e-9, Ms_Am = 797700, 
+                  plan_rot=0, bbox_length_m = 100*1e-9, bbox_length_px = 100):
+        """ Creates disk with c/w vortex magnetisation
+            rad_m : Radius in metres
+            lz_m = thickness of disc in metres
+            Ms_Am : Magnetisation in A/m
+            plan_rot : Direction of magnetisation, rotated in degrees ac/w from +x
+            bbox_length_m : Length in metres of one side of the bounding box
+            bbox_length_px : Length in pixels of one side of the bounding box """
+        
+        def vortex(x,y):
+            """ Returns mx/my components for vortex state, 
+            given input x and y """
+            # angle between tangent and horizontal
+            theta=-1*np.arctan2(x,y)
+            # cosine/sine components
+            C=np.cos(theta)
+            S = np.sin(theta)
+            return C, S
+        
+        # Initialise bounding box parameters
+        p1 = (0,0,0)
+        p2 = (bbox_length_m,bbox_length_m,bbox_length_m)
+        n = (bbox_length_px,bbox_length_px,bbox_length_px)
+        mesh_params = [p1,p2,n]
+        res = bbox_length_m / bbox_length_px # resolution in m per px 
+        ci = int(bbox_length_px/2) # index of bbox centre
+        
+        # Initialise magnetisation arrays
+        mx = np.linspace(0,bbox_length_m,num=bbox_length_px) * 0
+        my,mz = mx,mx
+        MX, MY, MZ = np.meshgrid(mx, my, mz, indexing='ij')
+
+        # Assign magnetisation
+        for i,a in enumerate(MX):
+            for j,b in enumerate(a):
+                for k,c in enumerate(b):
+                    if (i-ci)**2 + (j-ci)**2 < (rad_m/res)**2 and ci-.5*lz_m/res < k < ci+.5*lz_m/res:
+                        mx,my = vortex(i-ci,j-ci)
+                        MX[i,j,k] = mx*Ms_Am
+                        MY[i,j,k] = my*Ms_Am
+                        
+        
+        return MX,MY,MZ, mesh_params
+    
+    def disc_uniform(rad_m = 30*1e-9, lz_m = 20*1e-9, Ms_Am = 797700, 
+                  plan_rot=0, bbox_length_m = 100*1e-9, bbox_length_px = 100):
+        """ Creates disk with c/w vortex magnetisation
+            rad_m : Radius in metres
+            lz_m = thickness of disc in metres
+            Ms_Am : Magnetisation in A/m
+            plan_rot : Direction of magnetisation, rotated in degrees ac/w from +x
+            bbox_length_m : Length in metres of one side of the bounding box
+            bbox_length_px : Length in pixels of one side of the bounding box """
+        
+        # Initialise bounding box parameters
+        p1 = (0,0,0)
+        p2 = (bbox_length_m,bbox_length_m,bbox_length_m)
+        n = (bbox_length_px,bbox_length_px,bbox_length_px)
+        mesh_params = [p1,p2,n]
+        res = bbox_length_m / bbox_length_px # resolution in m per px 
+        ci = int(bbox_length_px/2) # index of bbox centre
+        
+        # Initialise magnetisation arrays
+        mx = np.linspace(0,bbox_length_m,num=bbox_length_px) * 0
+        my,mz = mx,mx
+        MX, MY, MZ = np.meshgrid(mx, my, mz, indexing='ij')
+
+        # Assign magnetisation
+        for i,a in enumerate(MX):
+            for j,b in enumerate(a):
+                for k,c in enumerate(b):
+                    if (i-ci)**2 + (j-ci)**2 < (rad_m/res)**2 and ci-.5*lz_m/res < k < ci+.5*lz_m/res:
+                        MX[i,j,k] = np.cos(plan_rot*np.pi/180)*Ms_Am
+                        MY[i,j,k] = np.sin(plan_rot*np.pi/180)*Ms_Am
+                        
+        
+        return MX,MY,MZ, mesh_params
+    
+    def tri_pris(rad_m = 30*1e-9, lz_m = 20*1e-9, Ms_Am = 797700, 
+                  plan_rot=0, bbox_length_m = 100*1e-9, bbox_length_px = 100):
+        """ Creates disk with c/w vortex magnetisation
+            rad_m : Radius in metres
+            lz_m = thickness of disc in metres
+            Ms_Am : Magnetisation in A/m
+            plan_rot : Direction of magnetisation, rotated in degrees ac/w from +x
+            bbox_length_m : Length in metres of one side of the bounding box
+            bbox_length_px : Length in pixels of one side of the bounding box """
+        
+        # Initialise bounding box parameters
+        p1 = (0,0,0)
+        p2 = (bbox_length_m,bbox_length_m,bbox_length_m)
+        n = (bbox_length_px,bbox_length_px,bbox_length_px)
+        mesh_params = [p1,p2,n]
+        res = bbox_length_m / bbox_length_px # resolution in m per px 
+        ci = int(bbox_length_px/2) # index of bbox centre
+        
+        # Initialise magnetisation arrays
+        mx = np.linspace(0,bbox_length_m,num=bbox_length_px) * 0
+        my,mz = mx,mx
+        MX, MY, MZ = np.meshgrid(mx, my, mz, indexing='ij')
+        
+        # Define gradient/intercept of bounding lines
+        m1, c1 = 5, 100
+        m2, c2 = 0, -25
+        m3, c3 = -0.6, 0
+
+        # Assign magnetisation
+        for i,a in enumerate(MX):
+            for j,b in enumerate(a):
+                for k,c in enumerate(b):
+                    x = i-ci
+                    y = j-ci
+                    z = k-ci
+                    if y < (m1*x+c1) and y > (m2*x + c2) and y < (m3*x + c3) and ((z >-20 and z<-10) or (z>0 and z<30)):
+                        MX[i,j,k] = Ms_Am
+                        
+        #MX = np.swapaxes(MX,0,1)
+                        
+        return MX,MY,MZ, mesh_params
+    
+    def rod(rad_m = 10*1e-9, lx_m = 60*1e-9, Ms_Am = 797700, 
+                  plan_rot=0, bbox_length_m = 100*1e-9, bbox_length_px = 100):
+        """ Creates uniformly magnetised cylindrical rod lying along x
+            rad_m : Radius in metres
+            lx_m = length of rod in metres
+            Ms_Am : Magnetisation in A/m
+            plan_rot : Direction of magnetisation, rotated in degrees ac/w from +x
+            bbox_length_m : Length in metres of one side of the bounding box
+            bbox_length_px : Length in pixels of one side of the bounding box """
+        
+        # Initialise bounding box parameters
+        p1 = (0,0,0)
+        p2 = (bbox_length_m,bbox_length_m,bbox_length_m)
+        n = (bbox_length_px,bbox_length_px,bbox_length_px)
+        mesh_params = [p1,p2,n]
+        res = bbox_length_m / bbox_length_px # resolution in m per px 
+        ci = int(bbox_length_px/2) # index of bbox centre
+        
+        # Initialise magnetisation arrays
+        mx = np.linspace(0,bbox_length_m,num=bbox_length_px) * 0
+        my,mz = mx,mx
+        MX, MY, MZ = np.meshgrid(mx, my, mz, indexing='ij')
+
+        # Assign magnetisation
+        for i,a in enumerate(MX):
+            for j,b in enumerate(a):
+                for k,c in enumerate(b):
+                    x = i-ci
+                    y = j-ci
+                    z = k-ci
+                    if (k-ci)**2 + (j-ci)**2 < (rad_m/res)**2 and ci-.5*lx_m/res < i < ci+.5*lx_m/res:
+                        MX[i,j,k] = Ms_Am
+                        
+        #MX = np.swapaxes(MX,0,1)
+                        
+        return MX,MY,MZ, mesh_params
+
+def plot_2d_mag(mx,my,mesh_params=None,Ms=None,s=1):
+    """ Takes x/y magnetisation projections and creates a plot
+        uses quivers for direction and colour for magnitude """
+    if type(Ms) == type(None):
+        Ms = np.max(np.max((mx**2+my**2)**.5))
+    
+    fig = plt.figure(figsize=(5, 5))
+    ax = plt.gca()
+
+    if mesh_params == None:
+        p1 = (0,0,0)
+        sx,sy = np.shape(mx)
+        p2 = (sx,sy,sx)
+        n = p2
+    else:
+        p1,p2,n = mesh_params
+        
+    x = np.linspace(p1[0],p2[0],num=n[0])
+    y = np.linspace(p1[1],p2[1],num=n[1])
+    xs,ys = np.meshgrid(x,y)
+    
+    plt.quiver(xs[::s,::s],ys[::s,::s],mx[::s,::s].T,my[::s,::s].T,pivot='mid',scale=Ms*22,width=0.009,headaxislength=5,headwidth=4,minshaft=1.8)
+    mag = (mx**2+my**2)**.5
+    plt.imshow(mag.T,origin='lower',extent=[p1[0],p2[0],p1[1],p2[1]],vmin=0,vmax=Ms,cmap='Blues')
+    cbar = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar.set_label('$|M_{\perp}$| / $A $', rotation=-270,fontsize=15)
+    
+    plt.xlabel('x / m',fontsize=15)
+    plt.ylabel('y / m',fontsize=15)
+    plt.show()
+    
+def project_along_z(U,mesh_params=None):
+    """ Takes a 3D array and projects along the z component 
+    It does this by multiplying each layer by its thickness
+    and then summing down the axis. """
+    if mesh_params == None:
+        p1 = (0,0,0)
+        sx,sy,sz = np.shape(U)
+        p2 = (sx,sy,sz)
+        n = p2
+    else:
+        p1,p2,n = mesh_params
+    
+    # Get resolution    
+    z_size = p2[2]
+    z_res = z_size/n[2]
+    
+    # project
+    u_proj = np.sum(U*z_res,axis=2)
+    
+    return u_proj
+
+def calculate_A_3D(MX,MY,MZ, mesh_params=None,n_pad=100,tik_filter=0.01):
+    """ Input(3D (nx,ny,nz) array for each component of M) and return
+    three 3D arrays of magnetic vector potential 
+    
+    Note, returned arrays will remain padded since if they are used for
+    projection to phase change this will make a difference. So the new
+    mesh parameters are also returned
+    
+    """
+    if mesh_params == None:
+        p1 = (0,0,0)
+        sx,sy,sz = np.shape(MX)
+        p2 = (sx,sy,sx)
+        n = p2
+    else:
+        p1,p2,n = mesh_params
+    
+    # zero pad M to avoid FT convolution wrap-around artefacts
+    mxpad = np.pad(MX,[(n_pad,n_pad),(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+    mypad = np.pad(MY,[(n_pad,n_pad),(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+    mzpad = np.pad(MZ,[(n_pad,n_pad),(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+
+    # take 3D FT of M    
+    ft_mx = np.fft.fftn(mxpad)
+    ft_my = np.fft.fftn(mypad)
+    ft_mz = np.fft.fftn(mzpad)
+    
+    # Generate K values
+    resx = p2[0]/n[0] # resolution in m per px 
+    resy = p2[1]/n[1] # resolution in m per px 
+    resz = p2[2]/n[2] # resolution in m per px 
+
+    kx = np.fft.fftfreq(ft_mx.shape[0],d=resx)
+    ky = np.fft.fftfreq(ft_my.shape[0],d=resy)
+    kz = np.fft.fftfreq(ft_mz.shape[0],d=resz)
+    KX, KY, KZ = np.meshgrid(kx,ky,kz, indexing='ij') # Create a grid of coordinates
+    
+    # vacuum permeability
+    mu0 = 4*np.pi*1e-7
+    
+    # Calculate 1/k^2 with Tikhanov filter
+    if tik_filter == 0:
+        K2_inv = np.nan_to_num(((KX**2+KY**2+KZ**2)**.5)**-2)
+    else:
+        K2_inv = ((KX**2+KY**2+KZ**2)**.5 + tik_filter*resx)**-2
+    
+    # M cross K
+    cross_x = ft_my*KZ - ft_mz*KY
+    cross_y = -ft_mx*KZ + ft_mz*KX
+    cross_z = -ft_my*KX + ft_mx*KY
+    
+    # Calculate A(k)
+    ft_Ax = (-1j * mu0 * K2_inv) * cross_x
+    ft_Ay = (-1j * mu0 * K2_inv) * cross_y
+    ft_Az = (-1j * mu0 * K2_inv) * cross_z
+    
+    # Inverse fourier transform
+    Ax = np.fft.ifftn(ft_Ax)
+    AX = Ax.real
+    Ay = np.fft.ifftn(ft_Ay)
+    AY = Ay.real
+    Az = np.fft.ifftn(ft_Az)
+    AZ = Az.real
+    
+    # new mesh parameters (with padding)
+    n = (n[0]+2*n_pad,n[1]+2*n_pad,n[2]+2*n_pad)
+    p2 = (p2[0]+2*n_pad*resx,p2[1]+2*n_pad*resy,p2[2]+2*n_pad*resz)
+    mesh_params=(p1,p2,n)
+    
+    return AX,AY,AZ,mesh_params
+
+def calculate_phase_AZ(AZ,mesh_params=None):
+    if mesh_params == None:
+        p1 = (0,0,0)
+        sx,sy,sz = np.shape(MX)
+        p2 = (sx,sy,sx)
+        n = p2
+        mesh_params = [p1,p2,n]
+    else:
+        p1,p2,n = mesh_params
+    """ Calculates projected phase change from 3D AZ """
+    AZ_proj = project_along_z(AZ,mesh_params=mesh_params) 
+    phase = AZ_proj * -1* np.pi/constants.codata.value('mag. flux quantum') / (2*np.pi)
+    return phase
+
+def calculate_phase_M_2D(MX,MY,MZ,mesh_params,n_pad=500,tik_filter=0.01):
+    """ Preffered method. Takes 3D MX,MY,MZ magnetisation arrays
+    and calculates phase shift in rads in z direction.
+    First projects M from 3D to 2D which speeds up calculations """
+    p1,p2,n=mesh_params
+    
+    # J. Loudon et al, magnetic imaging, eq. 29
+    const = .5 * 1j * 4*np.pi*1e-7 / constants.codata.value('mag. flux quantum')
+
+    # Define resolution from mesh parameters
+    resx = p2[0]/n[0] # resolution in m per px 
+    resy = p2[1]/n[1] # resolution in m per px 
+    resz = p2[2]/n[2] # resolution in m per px 
+    
+    # Project magnetisation array
+    mx = project_along_z(MX,mesh_params=mesh_params)
+    my = project_along_z(MY,mesh_params=mesh_params)
+    
+    # Take fourier transform of M
+    # Padding necessary to stop Fourier convolution wraparound (spectral leakage)
+    if n_pad > 0:
+        mx = np.pad(mx,[(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+        my = np.pad(my,[(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+    
+    ft_mx = np.fft.fft2(mx)
+    ft_my = np.fft.fft2(my)
+    
+    # Generate K values
+    kx = np.fft.fftfreq(n[0]+2*n_pad,d=resx)
+    ky = np.fft.fftfreq(n[1]+2*n_pad,d=resy)
+    KX, KY = np.meshgrid(kx,ky, indexing='ij') # Create a grid of coordinates
+    
+    # Filter to avoid division by 0
+    if tik_filter == 0:
+        K2_inv = np.nan_to_num(((KX**2+KY**2)**.5)**-2)
+    else:
+        K2_inv = ((KX**2+KY**2)**.5 + tik_filter*resx)**-2
+
+    # Take cross product (we only need z component)
+    cross_z = (-ft_my*KX + ft_mx*KY)*K2_inv
+    
+    # Inverse fourier transform
+    phase = np.fft.ifft2(const*cross_z).real
+    
+    # Unpad
+    if n_pad > 0:
+        phase=phase[n_pad:-n_pad,n_pad:-n_pad]
+    
+    return phase
+
+def calculate_phase_M_3D(MX,MY,MZ,mesh_params,n_pad=100,tik_filter=0.01):
+    """ Slower than 2D but good for comparison. Takes 3D MX,MY,MZ magnetisation arrays
+    and calculates phase shift in rads in z direction.
+    Calculations performed directly in 3D """
+    p1,p2,n=mesh_params
+    
+    # constant prefactor
+    const = .5*1j*4*np.pi*1e-7/constants.codata.value('mag. flux quantum')
+
+    # Generate K values
+    resx = p2[0]/n[0] # resolution in m per px 
+    resy = p2[1]/n[1] # resolution in m per px 
+    resz = p2[2]/n[2] # resolution in m per px 
+    MX = np.pad(MX,[(n_pad,n_pad),(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+    MY = np.pad(MY,[(n_pad,n_pad),(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+    MZ = np.pad(MZ, [(n_pad,n_pad),(n_pad,n_pad),(n_pad,n_pad)], mode='constant', constant_values=0)
+    kx = np.fft.fftfreq(n[0]+2*n_pad,d=resx)
+    ky = np.fft.fftfreq(n[1]+2*n_pad,d=resy)
+    kz = np.fft.fftfreq(n[2]+2*n_pad,d=resz)
+    KX, KY, KZ = np.meshgrid(kx,ky,kz, indexing='ij') # Create a grid of coordinates
+    K2_inv = np.nan_to_num(((KX**2+KY**2+KZ**2)**.5+ tik_filter*resx)**-2)
+    
+    # Take 3D fourier transforms (only need x and y for cross-z)
+    ft_mx = np.fft.fftn(MX)
+    ft_my = np.fft.fftn(MY)
+    
+    # take cross product
+    cross_z = (-ft_my*KX + ft_mx*KY) * K2_inv
+    
+    # extract central slice
+    slice_z = cross_z[:,:,0] * resz 
+    
+    # inverse fourier transform
+    phase = np.fft.ifft2(const*slice_z).real
+    
+    if n_pad > 0:
+        phase = phase[n_pad:-n_pad,n_pad:-n_pad]
+    
+    return phase
+
+def analytical_sphere(B0_T=1.6,r_m=50*1e-9,mesh_params=None,beta=-90,n_pad=100):
+    """ Analytically calculates the phase change for a sphere (from Beleggia and Zhu 2003)"""
+    import scipy
+    if mesh_params == None:
+        p1 = (0,0,0)
+        s = np.shape(AX)
+        p2 = (s[0],s[1],s[2])
+        n = p2
+        mesh_params = [p1,p2,n]
+    p1,p2,n=mesh_params
+    
+    # Calculate prefactor
+    const = 4 * np.pi**2 * 1j * B0_T  *(r_m/2/np.pi)**2/ constants.codata.value('mag. flux quantum')
+    
+    # Generate K values
+    resx = p2[0]/n[0] # resolution in m per px 
+    resy = p2[1]/n[1] # resolution in m per px 
+    
+    kx = np.fft.fftfreq(n[0]+2*n_pad,d=resx)#/(2*np.pi))
+    ky = np.fft.fftfreq(n[1]+2*n_pad,d=resy)#/(2*np.pi))
+    KX, KY = np.meshgrid(kx,ky)#,indexing='ij') # Create a grid of coordinates
+    
+    # Calculate 1/k^2 with Tikhanov filter
+    K3_inv = np.nan_to_num(((KX**2+KY**2)**.5)**-3)
+    K =(KX**2+KY**2)**.5
+
+    #The normalized sinc function is the Fourier transform of the rectangular function with no scaling. np default is normalised
+    phase_ft = const * (KY*np.cos(beta*np.pi/180) - KX*np.sin(beta*np.pi/180)) * K3_inv \
+                        * scipy.special.spherical_jn(1,r_m*(2*np.pi)*K) / (resx*resy)
+    
+    phase = np.fft.ifft2(phase_ft).real 
+    
+    phase = np.fft.ifftshift(phase) 
+    
+    phase = phase[n_pad:-n_pad,n_pad:-n_pad]
+    
+    return phase
+
+def analytical_rectangle(B0_T=1.6,lx_m=200*1e-9,ly_m=140*1e-9,lz_m=20*1e-9,mesh_params=None,beta=300,n_pad=100):
+    """ Analytically calculates the phase change for a rectangle (from Beleggia and Zhu 2003)"""
+    if mesh_params == None:
+        p1 = (0,0,0)
+        s = np.shape(AX)
+        p2 = (s[0],s[1],s[2])
+        n = p2
+        mesh_params = [p1,p2,n]
+    p1,p2,n=mesh_params
+    
+    # Calculate prefactor
+    V = lx_m*ly_m*lz_m
+    const = 1j*np.pi*B0_T*V/constants.codata.value('mag. flux quantum')
+    
+    # Generate K values
+    resx = p2[0]/n[0] # resolution in m per px 
+    resy = p2[1]/n[1] # resolution in m per px 
+
+    kx = np.fft.fftfreq(n[0]+2*n_pad,d=resx)
+    ky = np.fft.fftfreq(n[1]+2*n_pad,d=resy)
+    KX, KY = np.meshgrid(kx,ky,indexing='ij') # Create a grid of coordinates
+    #KX,KY=KX*(2*np.pi),KY*(2*np.pi)
+    
+    # Calculate 1/k^2 with Tikhanov filter
+    K2_inv = np.nan_to_num(((KX**2+KY**2)**.5)**-2)
+
+    #The normalized sinc function is the Fourier transform of the rectangular function with no scaling. np default is normalised
+    phase_ft = const * K2_inv * (KY*np.cos(beta*np.pi/180) - KX*np.sin(beta*np.pi/180)) * np.sinc(lx_m*KX) * np.sinc(ly_m*KY) / (resx*resy)
+    
+    phase = np.fft.ifft2(phase_ft).real
+    
+    phase = np.fft.ifftshift(phase) / (2*np.pi)
+    
+    if n_pad>0:
+        phase = phase[n_pad:-n_pad,n_pad:-n_pad]
+    
+    return phase
+
+def linsupPhi(mx=1.0, my=1.0, mz=1.0, Dshp=None, theta_x=0.0, theta_y=0.0, pre_B=1.0, pre_E=1, v=1, multiproc=True):
+    """Applies linear superposition principle for 3D reconstruction of magnetic and electrostatic phase shifts.
+    This function will take 3D arrays with Mx, My and Mz components of the 
+    magnetization, the Dshp array consisting of the shape function for the 
+    object (1 inside, 0 outside), and the tilt angles about x and y axes to 
+    compute the magnetic and the electrostatic phase shift. Initial computation 
+    is done in Fourier space and then real space values are returned.
+    Args: 
+        mx (3D array): x component of magnetization at each voxel (z,y,x)
+        my (3D array): y component of magnetization at each voxel (z,y,x)
+        mz (3D array): z component of magnetization at each voxel (z,y,x)
+        Dshp (3D array): Binary shape function of the object. Where value is 0,
+            phase is not computed.  
+        theta_x (float): Rotation around x-axis (degrees). Rotates around x axis
+            then y axis if both are nonzero. 
+        theta_y (float): Rotation around y-axis (degrees) 
+        pre_B (float): Numerical prefactor for unit conversion in calculating 
+            the magnetic phase shift. Units 1/pixels^2. Generally 
+            (2*pi*b0*(nm/pix)^2)/phi0 , where b0 is the Saturation induction and 
+            phi0 the magnetic flux quantum. 
+        pre_E (float): Numerical prefactor for unit conversion in calculating the 
+            electrostatic phase shift. Equal to sigma*V0, where sigma is the 
+            interaction constant of the given TEM accelerating voltage (an 
+            attribute of the microscope class), and V0 the mean inner potential.
+        v (int): Verbosity. v >= 1 will print status and progress when running
+            without numba. v=0 will suppress all prints. 
+        mp (bool): Whether or not to implement multiprocessing. 
+    Returns: 
+        tuple: Tuple of length 2: (ephi, mphi). Where ephi and mphi are 2D numpy
+        arrays of the electrostatic and magnetic phase shifts respectively. 
+    """
+    import time
+    vprint = print if v>=1 else lambda *a, **k: None
+    [dimz,dimy,dimx] = mx.shape
+    dx2 = dimx//2
+    dy2 = dimy//2
+    dz2 = dimz//2
+
+    ly = (np.arange(dimy)-dy2)/dimy
+    lx = (np.arange(dimx)-dx2)/dimx
+    [Y,X] = np.meshgrid(ly,lx, indexing='ij')
+    dk = 2.0*np.pi # Kspace vector spacing
+    KX = X*dk
+    KY = Y*dk
+    KK = np.sqrt(KX**2 + KY**2) # same as dist(ny, nx, shift=True)*2*np.pi
+    zeros = np.where(KK == 0)   # but we need KX and KY later. 
+    KK[zeros] = 1.0 # remove points where KK is zero as will divide by it
+
+    # compute S arrays (will apply constants at very end)
+    inv_KK =  1/KK**2
+    Sx = 1j * KX * inv_KK
+    Sy = 1j * KY * inv_KK
+    Sx[zeros] = 0.0
+    Sy[zeros] = 0.0
+    
+    # Get indices for which to calculate phase shift. Skip all pixels where
+    # thickness == 0 
+    if Dshp is None: 
+        Dshp = np.ones(mx.shape)
+    # exclude indices where thickness is 0, compile into list of ((z1,y1,x1), (z2,y2...
+    zz, yy, xx = np.where(Dshp != 0)
+    inds = np.dstack((zz,yy,xx)).squeeze()
+
+    # Compute the rotation angles
+    st = np.sin(np.deg2rad(theta_x))
+    ct = np.cos(np.deg2rad(theta_x))
+    sg = np.sin(np.deg2rad(theta_y))
+    cg = np.cos(np.deg2rad(theta_y))
+
+    x = np.arange(dimx) - dx2
+    y = np.arange(dimy) - dy2
+    z = np.arange(dimz) - dz2
+    Z,Y,X = np.meshgrid(z,y,x, indexing='ij') # grid of actual positions (centered on 0)
+
+    # compute the rotated values; 
+    # here we apply rotation about X first, then about Y
+    i_n = Z*sg*ct + Y*sg*st + X*cg
+    j_n = Y*ct - Z*st
+
+    mx_n = mx*cg + my*sg*st + mz*sg*ct
+    my_n = my*ct - mz*st
+
+    # setup 
+    mphi_k = np.zeros(KK.shape,dtype=complex)
+    ephi_k = np.zeros(KK.shape,dtype=complex)
+
+    nelems = np.shape(inds)[0]
+    stime = time.time()
+    vprint(f'Beginning phase calculation for {nelems:g} voxels.')
+    if multiproc:
+        vprint("Running in parallel with numba.")
+        ephi_k, mphi_k = exp_sum(mphi_k, ephi_k, inds, KY, KX, j_n, i_n, my_n, mx_n, Sy, Sx)        
+
+    else:
+        vprint("Running on 1 cpu.")
+        otime = time.time()
+        vprint('0.00%', end=' .. ')
+        cc = -1
+        for ind in inds:
+            ind = tuple(ind)
+            cc += 1
+            if time.time() - otime >= 15:
+                vprint(f'{cc/nelems*100:.2f}%', end=' .. ')
+                otime = time.time()
+            # compute the expontential summation
+            sum_term = np.exp(-1j * (KY*j_n[ind] + KX*i_n[ind]))
+            ephi_k += sum_term 
+            mphi_k += sum_term * (my_n[ind]*Sx - mx_n[ind]*Sy)
+        vprint('100.0%')
+
+    vprint(f"total time: {time.time()-stime:.5g} sec, {(time.time()-stime)/nelems:.5g} sec/voxel.")
+    #Now we have the phases in K-space. We convert to real space and return
+    ephi_k[zeros] = 0.0
+    mphi_k[zeros] = 0.0
+    ephi = (np.fft.ifftshift(np.fft.ifftn(np.fft.ifftshift(ephi_k)))).real*pre_E
+    mphi = (np.fft.ifftshift(np.fft.ifftn(np.fft.ifftshift(mphi_k)))).real*pre_B
+
+    return (ephi,mphi)
+
+def plot_phase_proj(phase,mesh_params=None):
+    """ Plots the projected phase shift in rads """
+    if mesh_params == None:
+            p1 = (0,0,0)
+            sx,sy,sz = np.shape(MX)
+            p2 = (sx,sy,sx)
+            n = p2
+    else:
+        p1,p2,n = mesh_params
+
+    plt.imshow(phase.T,extent=[p1[0],p2[0],p1[1],p2[1]],origin='lower')
+    cbar = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar.set_label('Projected phase shift / rad', rotation=-270,fontsize=15)
+    plt.xlabel('x / m',fontsize=14)
+    plt.ylabel('y / m',fontsize=14)
+    plt.show()
+    
+def calculate_B_from_A(AX,AY,AZ,mesh_params=None):
+    """ Takes curl of B to get A """
+    # Initialise parameters
+    phase_projs = []
+    if mesh_params == None:
+        p1 = (0,0,0)
+        s = np.shape(AX)
+        p2 = (s[0],s[1],s[2])
+        n = p2
+        mesh_params = [p1,p2,n]
+    p1,p2,n=mesh_params
+    
+    resx = p2[0]/n[0] # resolution in m per px 
+    resy = p2[1]/n[1] # resolution in m per px 
+    resz = p2[2]/n[2] # resolution in m per px 
+    
+    BX = np.gradient(AZ,resy)[1] - np.gradient(AY,resz)[2]
+    BY = np.gradient(AX,resz)[2] - np.gradient(AZ,resx)[0]
+    BZ = np.gradient(AY,resx)[0] - np.gradient(AX,resy)[1]
+        
+    return BX/(2*np.pi),BY/(2*np.pi),BZ/(2*np.pi)
+
+def calculate_B_from_phase(phase_B,mesh_params=None):
+    if mesh_params == None:
+        p1 = (0,0,0)
+        sx,sy = np.shape(mx)
+        p2 = (sx,sy,sx)
+        n = p2
+    else:
+        p1,p2,n = mesh_params
+        
+    x_size = p2[0]
+    x_res = x_size/n[0]
+    
+    y_size = p2[1]
+    y_res = y_size/n[1]
+    
+    d_phase = np.gradient(phase_B,x_res)
+    b_const = (constants.codata.value('mag. flux quantum')/(np.pi))
+    b_field_x = -b_const*d_phase[1]
+    b_field_y = b_const*d_phase[0]
+
+    mag_B = np.hypot(b_field_x,b_field_y)
+    
+    return mag_B,b_field_x,b_field_y
+
+def plot_colorwheel(alpha=1,rot=0,flip= False, ax=None,rad=0.5,clip=48,shape=200,shift_centre=None,mesh_params=None):
+    """ Plots a colorwheel
+    alpha - match alpha to the alpha in your B plot (i.e. how black is the centre)
+    rot - rotate the color wheel, enter angle in degrees (must be multiple of 90)
+    flip - change between cw / ccw
+    ax - pass an axis to plot on top of another image
+    rad - radius of the colorwheel, scaled 0 to 1
+    clip - radius of colorwheel clip in distance (m)
+    shape - length of array size (must be square array)
+    shift_centre - tuple lets you shift centre in px (horz,vert)
+    """
+    def cart2pol(x, y):
+        """ Convert cartesian to polar coordinates
+        rho = magnitude, phi = angle """
+        rho = np.sqrt(x**2 + y**2)
+        phi = np.arctan2(y, x)
+        return(rho, phi)
+    
+    if mesh_params == None:
+        p1 = (0,0,0)
+        sx,sy =200,200
+        p2 = (sx,sy,sx)
+        n = p2
+    else:
+        p1,p2,n = mesh_params
+        
+    extent = (p1[0],p2[0],p1[1],p2[1])
+    
+    ax_tog = 1
+    if type(ax) == type(None):
+        fig,ax = plt.subplots()
+        ax_tog=0
+        
+    scale = (p2[0]-p1[0])
+    centre = np.array((scale/2, scale/2)) #* scale/shape/100
+    if type(shift_centre) == type(None):
+        shift_centre=(0,0)
+    shift_centre = np.array(shift_centre)/shape #* scale/shape/100
+    
+    # Create coordinate space
+    x = np.linspace(-scale/2,scale/2,shape)
+    y = x
+    X,Y = np.meshgrid(x,y)
+
+    # Map theta values onto coordinate space 
+    thetas = np.ones_like(X)*0
+    for ix, xx in enumerate(x):
+        for iy, yy in enumerate(y):
+            # shifting will shift the centre of divergence
+            thetas[ix,iy] = cart2pol((xx+shift_centre[0]*scale),(yy+shift_centre[1]*scale))[1]
+
+    # Plot hsv colormap of angles
+    if flip == False:
+        im1 = ax.imshow(ndimage.rotate(thetas.T,180+rot),cmap='hsv_r',origin='lower',extent=extent,zorder=2)
+    if flip == True:
+        im1 = ax.imshow(ndimage.rotate(thetas,270+rot),cmap='hsv_r',origin='lower',extent=extent,zorder=2)
+
+    # Create alpha contour map
+    my_cmap = alpha_cmap()
+    
+    # Map circle radii onto xy coordinate space
+    circ = np.ones_like(X)*0
+    for ix, xx in enumerate(x):
+        for iy, yy in enumerate(y):
+            if (xx+shift_centre[1]*scale)**2 + (yy-shift_centre[0]*scale)**2 < (rad*scale)**2:
+                #print(xx,shift_centre[0])
+                circ[ix,iy] = cart2pol((xx+shift_centre[1]*scale),(yy-shift_centre[0]*scale))[0]
+
+    # Plot circle
+    im2 = plt.imshow(circ, cmap=my_cmap,alpha=alpha,extent=extent,zorder=2)
+    
+    print(type(ax))
+    if ax_tog==1:
+        # Clip to make it circular
+        print(centre )#+shift_centre*scale*[-1,-1]+scale/shape/2)
+        patch = patches.Circle(centre +shift_centre*scale*[1,1], radius=clip, transform=ax.transData)
+        im2.set_clip_path(patch)
+        im1.set_clip_path(patch)
+    
+    if ax_tog==0:
+        # Clip to make it circular
+        patch = patches.Circle(centre +shift_centre*scale*[1,1]-scale/shape/4, radius=clip, transform=ax.transData)
+        im2.set_clip_path(patch)
+        im1.set_clip_path(patch)
+        ax.axis('off')
+        
+def plot_2d_B(bx,by,mesh_params=None, ax=None,s=5,scale=7,mag_res=5, quiver=True, B_contour=True,phase=None,phase_res=np.pi/50):
+    """ Plot projected B field
+    quiver = turn on/off the arrows
+    s = quiver density
+    scale = quiver arrow size
+    B_contour = turn on/off |B| contour lines
+    mag_res = spacing of |B| contour lines in nT
+    phase = pass phase shifts to plot phase contours
+    phase_res = spacing of phase contours in radians
+    """
+    if ax == None:
+        fig,ax = plt.subplots()
+    
+    if mesh_params == None:
+        p1 = (0,0,0)
+        s = np.shape(b_field_x)
+        p2 = (s[0],s[1],s[0])
+        n = p2
+        mesh_params = [p1,p2,n]
+    
+    p1,p2,n = mesh_params
+    mag_B = np.hypot(bx,by)
+
+    # Create alpha contour map
+    my_cmap = alpha_cmap()
+
+    # plot B field direction as a colour
+    # using tan-1(vy/vx)
+    angles = np.arctan2(by,bx)
+    angles = shift_angles(angles,np.pi)
+    ax.imshow(angles.T,origin='lower', 
+               extent=[p1[0], p2[0], p1[1],p2[1]], cmap='hsv')
+
+    # Plot magnitude of B as in black/transparent scale
+    ax.imshow(mag_B.T,origin='lower', 
+               extent=[p1[0], p2[0], p1[1],p2[1]],interpolation='spline16', cmap=my_cmap,alpha=1)
+
+    ax.set_xlabel('x / m', fontsize = 16)
+    ax.set_ylabel('y / m', fontsize = 16)
+    
+    # Quiver plot of Bx,By
+    if quiver==True:
+        x = np.linspace(p1[0],p2[0],num=n[0])
+        y = np.linspace(p1[1],p2[1],num=n[1])
+        xs,ys = np.meshgrid(x,y)
+        ax.quiver(xs[::s,::s],ys[::s,::s],bx[::s,::s].T,by[::s,::s].T,color='white',scale=np.max(abs(mag_B))*scale,
+                  pivot='mid',width=0.009,headaxislength=5,headwidth=4,minshaft=1.8)
+    
+    # Contour plot of |B|
+    if B_contour==True:
+        mag_range = (np.max(mag_B)-np.min(mag_B))/1e-9
+        n_levels = int(mag_range/mag_res)
+        cs = ax.contour(mag_B.T,origin='lower',levels=10, extent=[p1[0], p2[0], p1[1],p2[1]], alpha = .3,colors='white')
+        
+    # Contour plot of phase
+    if type(phase)!=type(None):
+        phase_range = (np.max(phase)-np.min(phase))/1e-9
+        n_levels = int(phase_range/phase_res)
+        cs = ax.contour(phase.T-np.min(phase).T,origin='lower',levels=10, extent=[p1[0], p2[0], p1[1],p2[1]], alpha = .3,colors='white')
+        
+def alpha_cmap():
+    """ Returns a colormap object that is black,
+    with alpha=1 at vmin and alpha=0 at vmax"""
+    # Create a colour map which is just black
+    colors = [(0.0, 'black'), (1.0, 'black')]
+    cmap = matplotlib.colors.LinearSegmentedColormap.from_list("alpha_cmap", colors)
+    # Get colors from current map for values 1 to 256
+    # These will all be black with alpha=1 (opaque), ie. [0,0,0,1]
+    my_cmap = cmap(np.arange(cmap.N))
+    # Set alpha (opaque and black (1) at vmin and fully transparanet at vmax)
+    my_cmap[:,-1] = np.linspace(1,0,cmap.N)
+    # create new colormap with the new alpha values
+    my_cmap = ListedColormap(my_cmap)
+    
+    return my_cmap
+
+def shift_angles(vals,angle=None):
+    """ Takes angles currently in -pi to +pi range,
+    and lets you shift them by an angle, keeping them
+    in the same range."""
+    
+    if angle == None:
+        return vals
+    
+    newvals = vals+angle
+    for i,vv in enumerate(newvals):
+        for j,v in enumerate(vv):
+            if v > np.pi:
+                newvals[i,j] = v - 2*np.pi
+            if v < -np.pi:
+                newvals[i,j] = v + 2*np.pi
+            
+    return newvals

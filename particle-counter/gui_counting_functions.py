@@ -385,17 +385,18 @@ def full_count_process(im,raw_im,px,w,h,ax, return_vals = True,
     if return_vals == True:
         return ds,errs,filtered
     
-def manual_detection(im,max_shapes=20):
+def manual_detection(im,ax,max_shapes=20):
     """ Manually click out the boundary of a shape in the event that auto-filtering fails"""
     #swap_pyplot_backend(plot_inline=False)
     # Show image
-    #plt.imshow(im,cmap='Greys_r')
+    print('8888')
+    ax.imshow(im,cmap='Greys_r')
     #plt.axis('off')
     
     all_points = []
     all_s = []
     # Get user input
-    points = plt.ginput(n=20, show_clicks=True,mouse_stop=3,mouse_pop=2,timeout=60)
+    points = ax.ginput(n=20, show_clicks=True,mouse_stop=3,mouse_pop=2,timeout=60)
     if points == []:
         pass
     else:

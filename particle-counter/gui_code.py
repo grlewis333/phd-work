@@ -11,6 +11,7 @@ import types # for scroll
 import csv # for saving
 import time # for notifying
 from datetime import datetime
+import logging
 
 # Set fake Windows App ID to trick taskbar into displaying icon
 import ctypes
@@ -355,51 +356,51 @@ class Ui(QtWidgets.QMainWindow):
             self.label_statusbar.setText(r'Status: Error')
             
     def manualidentify(self):
-        try:
-            self.label_statusbar.setText(r'Status: Add points manually')
-            self.figure.clear() # clear old figure
-            self.ax = self.figure.add_subplot(111) # create an axis
-            self.ax.imshow(self.raw_im,cmap='Greys_r') # add image to axis
-            cf.plot_shapes(self.shapes,self.raw_im,self.ax,cols=['dodgerblue'])
-            self.plot()
+        print('9999')
+#         try:
+#             self.label_statusbar.setText(r'Status: Add points manually')
+#             self.figure.clear() # clear old figure
+#             self.ax = self.figure.add_subplot(111) # create an axis
+#             self.ax.imshow(self.raw_im,cmap='Greys_r') # add image to axis
+#             cf.plot_shapes(self.shapes,self.raw_im,self.ax,cols=['dodgerblue'])
+#             self.plot()
 
-            # Get new shapes from user input
-            new_s = cf.manual_detection(self.raw_im)
+#             # Get new shapes from user input
+#             #new_s = cf.manual_detection(self.raw_im,self.ax)
 
-            # add to existing shapes
-            self.shapes = np.concatenate((self.shapes,new_s))
+#             # add to existing shapes
+#             #self.shapes = np.concatenate((self.shapes,new_s))
 
-            #remove identical shapes
-            self.shapes = cf.remove_identical_shapes(self.shapes,threshold=.3)
+#             #remove identical shapes
+#             #self.shapes = cf.remove_identical_shapes(self.shapes,threshold=.3)
 
-            #plot
-            self.figure.clear() # clear old figure
-            self.ax = self.figure.add_subplot(111) # create an axis
-            # Fit circles to shapes and plot
-            cents,rads = cf.fit_circles(self.shapes)
-            ds = np.array(cf.calibrate_radii(rads,self.px))
-            cf.plot_circles(self.im,self.ax,self.raw_im,self.shapes,cents,rads,ds)
-            self.plot()
+#             #plot
+#             self.figure.clear() # clear old figure
+#             self.ax = self.figure.add_subplot(111) # create an axis
+#             # Fit circles to shapes and plot
+#             cents,rads = cf.fit_circles(self.shapes)
+#             ds = np.array(cf.calibrate_radii(rads,self.px))
+#             cf.plot_circles(self.im,self.ax,self.raw_im,self.shapes,cents,rads,ds)
+#             self.plot()
 
-            # Adjust rows
-            layout = self.gridLayout_13
-            cs = self.scrollAreaWidgetContents.children()
-            for i,w in enumerate(cs):
-                if i > 4:
-                    layout.removeWidget(w)
-                    w.deleteLater()
-                    w = None
-            # Add rows for shapes still there
-            for i,s in enumerate(self.shapes):
-                self.add_shape_row(i)
+#             # Adjust rows
+#             layout = self.gridLayout_13
+#             cs = self.scrollAreaWidgetContents.children()
+#             for i,w in enumerate(cs):
+#                 if i > 4:
+#                     layout.removeWidget(w)
+#                     w.deleteLater()
+#                     w = None
+#             # Add rows for shapes still there
+#             for i,s in enumerate(self.shapes):
+#                 self.add_shape_row(i)
 
-            # Toggle shape view on
-            self.checkBox_shapetoggle.setChecked(True)
+#             # Toggle shape view on
+#             self.checkBox_shapetoggle.setChecked(True)
 
-            self.label_statusbar.setText(r'Status: Idle')  
-        except:
-            
-            self.label_statusbar.setText(r'Status: Error')
+#             self.label_statusbar.setText(r'Status: Idle')  
+#         except Exception as e:          
+#             self.label_statusbar.setText(r'Status: big Error, %s' % str(e))
         
     def file_output(self):
         """ Connects to file input button
@@ -637,6 +638,7 @@ window = Ui() # Create an instance of our class
 
 # Show in fullscreen
 window.resize(800,800) # workaround for FS
+window.setMinimumSize(200,200) # perhaps needed?
 window.showMaximized()
 
 app.exec_() # Start the application
