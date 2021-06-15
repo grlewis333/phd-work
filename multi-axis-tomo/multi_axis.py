@@ -1550,7 +1550,7 @@ def plot_phase_proj(phase,mesh_params=None):
     """ Plots the projected phase shift in rads """
     if mesh_params == None:
             p1 = (0,0,0)
-            sx,sy,sz = np.shape(MX)
+            sx,sy = np.shape(phase)
             p2 = (sx,sy,sx)
             n = p2
     else:
@@ -1710,7 +1710,7 @@ def plot_2d_B(bx,by,mesh_params=None, ax=None,s=5,scale=7,mag_res=5, quiver=True
     
     if mesh_params == None:
         p1 = (0,0,0)
-        s = np.shape(b_field_x)
+        s = np.shape(bx)
         p2 = (s[0],s[1],s[0])
         n = p2
         mesh_params = [p1,p2,n]
