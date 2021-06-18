@@ -632,6 +632,25 @@ def generate_reconstruction(raw_data,vectors, algorithm = 'SIRT3D_CUDA', niter=1
                     balance=balance, steps=steps,callback_freq = callback_freq,
                     callback=('primal','gap','violation','step'))[0]
     
+    if algorithm == 'TV2':
+        data = rtr.tomo_data(raw_data, np.array(vectors), degrees=True,
+                    tilt_axis=0, stack_dim=1)
+
+        vol_shape = (data.shape[0],data.shape[0],data.shape[2])
+        projector = data.getOperator(vol_shape=vol_shape,
+                                    backend='astra',GPU=True)
+        alg = rtr.TV(vol_shape, order=2)
+        
+        if callback_freq == 0:
+            recon = alg.run(data=data,op=projector, maxiter=niter, weight=weight,
+                    balance=balance, steps=steps,
+                    callback=None)
+            
+        if callback_freq != 0:
+            recon = alg.run(data=data,op=projector, maxiter=niter, weight=weight,
+                    balance=balance, steps=steps,callback_freq = callback_freq,
+                    callback=('primal','gap','violation','step'))[0]
+    
     return recon
 
 def reorient_reconstruction(r):
@@ -1069,9 +1088,9 @@ class Magnetic_Phantom():
         MX, MY, MZ = np.meshgrid(mx, my, mz, indexing='ij')
         
         # Define gradient/intercept of bounding lines
-        m1, c1 = 5, 100
-        m2, c2 = 0, -25
-        m3, c3 = -0.6, 0
+        m1, c1 = 5/(100*1e-9)*bbox_length_m,   100 /100*bbox_length_px
+        m2, c2 = 0,                            -25 /100*bbox_length_px
+        m3, c3 = -0.6/(100*1e-9)*bbox_length_m, 0
 
         # Assign magnetisation
         for i,a in enumerate(MX):
@@ -1080,7 +1099,7 @@ class Magnetic_Phantom():
                     x = i-ci
                     y = j-ci
                     z = k-ci
-                    if y < (m1*x+c1) and y > (m2*x + c2) and y < (m3*x + c3) and ((z >-20 and z<-10) or (z>0 and z<30)):
+                    if y < (m1*x+c1) and y > (m2*x + c2) and y < (m3*x + c3) and ((z >-20/100*bbox_length_px and z<-10/100*bbox_length_px) or (z>0 and z<30/100*bbox_length_px)):
                         MX[i,j,k] = Ms_Am
                         
         #MX = np.swapaxes(MX,0,1)
@@ -1546,7 +1565,7 @@ def linsupPhi(mx=1.0, my=1.0, mz=1.0, Dshp=None, theta_x=0.0, theta_y=0.0, pre_B
 
     return (ephi,mphi)
 
-def plot_phase_proj(phase,mesh_params=None):
+def plot_phase_proj(phase,mesh_params=None,ax=None):
     """ Plots the projected phase shift in rads """
     if mesh_params == None:
             p1 = (0,0,0)
@@ -1555,12 +1574,16 @@ def plot_phase_proj(phase,mesh_params=None):
             n = p2
     else:
         p1,p2,n = mesh_params
+        
+    if ax == None:
+        fig,ax = plt.subplots()
+        
 
-    plt.imshow(phase.T,extent=[p1[0],p2[0],p1[1],p2[1]],origin='lower')
+    ax.imshow(phase.T,extent=[p1[0],p2[0],p1[1],p2[1]],origin='lower')
     cbar = plt.colorbar(fraction=0.046, pad=0.04)
     cbar.set_label('Projected phase shift / rad', rotation=-270,fontsize=15)
-    plt.xlabel('x / m',fontsize=14)
-    plt.ylabel('y / m',fontsize=14)
+    ax.set_xlabel('x / m',fontsize=14)
+    ax.set_ylabel('y / m',fontsize=14)
     plt.show()
     
 def calculate_B_from_A(AX,AY,AZ,mesh_params=None):
