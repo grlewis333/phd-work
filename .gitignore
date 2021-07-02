@@ -3,3 +3,4 @@ __pycache__/
 *.cache
 *_bin.py
 *.pyc
+multi-axis-tomo/recon_tests/sphere_91-proj_90-range_dual-sirt_data.npy

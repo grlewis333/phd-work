@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 import matplotlib.pyplot as plt                 # For normal plotting
 from mpl_toolkits.mplot3d import proj3d         # For 3D plotting
 import numpy as np                             # For maths
@@ -1282,7 +1280,7 @@ def calculate_phase_AZ(AZ,mesh_params=None):
     phase = AZ_proj * -1* np.pi/constants.codata.value('mag. flux quantum') / (2*np.pi)
     return phase
 
-def calculate_phase_M_2D(MX,MY,MZ,mesh_params,n_pad=500,tik_filter=0.01):
+def calculate_phase_M_2D(MX,MY,MZ,mesh_params,n_pad=500,tik_filter=0.01,unpad=True):
     """ Preffered method. Takes 3D MX,MY,MZ magnetisation arrays
     and calculates phase shift in rads in z direction.
     First projects M from 3D to 2D which speeds up calculations """
@@ -1327,8 +1325,9 @@ def calculate_phase_M_2D(MX,MY,MZ,mesh_params,n_pad=500,tik_filter=0.01):
     phase = np.fft.ifft2(const*cross_z).real
     
     # Unpad
-    if n_pad > 0:
-        phase=phase[n_pad:-n_pad,n_pad:-n_pad]
+    if unpad == True:
+        if n_pad > 0:
+            phase=phase[n_pad:-n_pad,n_pad:-n_pad]
     
     return phase
 
@@ -1813,4 +1812,3 @@ def shift_angles(vals,angle=None):
                 newvals[i,j] = v + 2*np.pi
             
     return newvals
->>>>>>> 51ed596eeb9aeff43b4dedb0e9a97364cec1dd3d
