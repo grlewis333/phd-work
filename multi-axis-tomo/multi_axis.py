@@ -1578,14 +1578,15 @@ def plot_phase_proj(phase,mesh_params=None,ax=None):
         
     if ax == None:
         fig,ax = plt.subplots()
-        
+    fig=plt.gcf()
 
-    ax.imshow(phase.T,extent=[p1[0],p2[0],p1[1],p2[1]],origin='lower')
-    cbar = plt.colorbar(fraction=0.046, pad=0.04)
+    im = ax.imshow(phase.T,extent=[p1[0],p2[0],p1[1],p2[1]],origin='lower')
+    cbar = fig.colorbar(im,fraction=0.046, pad=0.04,ax=ax)
+
     cbar.set_label('Projected phase shift / rad', rotation=-270,fontsize=15)
     ax.set_xlabel('x / m',fontsize=14)
     ax.set_ylabel('y / m',fontsize=14)
-    plt.show()
+    #plt.show()
     
 def calculate_B_from_A(AX,AY,AZ,mesh_params=None):
     """ Takes curl of B to get A """
