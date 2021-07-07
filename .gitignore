@@ -6,3 +6,5 @@ __pycache__/
 multi-axis-tomo/recon_tests/sphere_91-proj_90-range_dual-sirt_data.npy
 multi-axis-tomo/recon_tests/tri_91-proj_90-range_dual-sirt_data.npy
 multi-axis-tomo/recon_tests/vortex_91-proj_90-range_dual-sirt_data.npy
+*.vts
+*.vtr
