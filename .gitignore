@@ -8,3 +8,4 @@ multi-axis-tomo/recon_tests/tri_91-proj_90-range_dual-sirt_data.npy
 multi-axis-tomo/recon_tests/vortex_91-proj_90-range_dual-sirt_data.npy
 *.vts
 *.vtr
+multi-axis-tomo/skyrmion demo/D-90nm_t-20nm_B-0T-skyrmion.npy

@@ -15,6 +15,7 @@ from scipy import constants
 import matplotlib.patches as patches
 import matplotlib
 from matplotlib.colors import ListedColormap
+from pyevtk.hl import gridToVTK
 
 def generate_tri_pris(n = 100, size_n = 1,pi=1):
     """ 
@@ -1813,3 +1814,377 @@ def shift_angles(vals,angle=None):
                 newvals[i,j] = v + 2*np.pi
             
     return newvals
+
+#### from magnetic_reconstruction
+def generate_phase_data(MX,MY,MZ,angles,mesh_params=None,n_pad=500,unpad=False):
+    """ Returns phase projections for given M and angles
+    in order [x, i_tilt, y] """
+    # Initialise parameters
+    phase_projs = []
+    if mesh_params == None:
+        p1 = (0,0,0)
+        s = np.shape(MX)
+        p2 = (s[0],s[1],s[2])
+        n = p2
+        mesh_params = [p1,p2,n]
+    
+    # Loop through projection angles
+    for i in range(len(angles)):
+        ax,ay,az = angles[i]
+        #rotate M
+        MXr,MYr,MZr = rotate_magnetisation(MX,MY,MZ,ax,ay,az)
+        #calculate phase
+        phase = calculate_phase_M_2D(MXr,MYr,MZr,mesh_params=mesh_params,n_pad=n_pad,unpad=unpad)
+        phase = np.flipud(phase.T)
+
+        phase_projs.append(phase)            
+    
+    # Prepare projections for reconstruction
+    phase_projs = np.transpose(phase_projs,axes=[1,0,2]) # reshape so proj is middle column
+        
+    return np.array(phase_projs)
+
+def rotate_magnetisation(U,V,W,ax=0,ay=0,az=0):
+    """ 
+    Takes 3D gridded magnetisation values as input
+    and returns them after an intrinsic rotation ax,ay,az 
+    about the x,y,z axes (given in degrees) 
+    (Uses convention of rotating about z, then y, then x)
+    """
+    # Rotate the gridded locations of M values
+    Ub = rotate_bulk(U,ax,ay,az)
+    Vb = rotate_bulk(V,ax,ay,az)
+    Wb = rotate_bulk(W,ax,ay,az)
+    
+    shape = np.shape(Ub)
+    
+    # Convert gridded values to vectors
+    coor_flat = grid_to_coor(Ub,Vb,Wb)
+    
+    # Rotate vectors
+    coor_flat_r = rotate_vector(coor_flat,ax,ay,az)
+    
+    # Convert vectors back to gridded values
+    Ur,Vr,Wr = coor_to_grid(coor_flat_r,shape=shape)
+    
+    # Set small values to 0
+    # (In theory the magnitude of M in each cell should be Ms,
+    #  so we can set magnitude lower than this to zero -
+    #  typically python rounding errors lead to very small values,
+    #  which it is useful to exclude here)
+    mag_max = (np.max(U)**2+np.max(V)**2+np.max(W)**2)**0.5
+    mag = (Ur**2+Vr**2+Wr**2)**.5
+#     for M in [Ur,Vr,Wr]:
+#         M[abs(M)<1e-5*mag_max] = 0
+#         M[mag<.6*mag_max] = 0
+    
+    return Ur,Vr,Wr
+
+def grid_to_coor(U,V,W):
+    """ Convert gridded 3D data (3,n,n,n) into coordinates (n^3, 3) """
+    coor_flat = []
+    nx = np.shape(U)[0]
+    ny = np.shape(U)[1]
+    nz = np.shape(U)[2]
+    for ix in range(nx):
+        for iy in range(ny):
+            for iz in range(nz):
+                x = U[ix,iy,iz]
+                y = V[ix,iy,iz]
+                z = W[ix,iy,iz]
+                coor_flat.append([x,y,z])
+                
+    return coor_flat
+
+def coor_to_grid(coor_flat,shape=None):
+    """ Convert coordinates (n^3, 3) into gridded 3D data (3,n,n,n) """
+    if shape == None:
+        n = int(np.round(np.shape(coor_flat)[0]**(1/3)))
+        shape = (n,n,n)
+    nx,ny,nz = shape
+    
+    x = np.take(coor_flat,0,axis=1)
+    y = np.take(coor_flat,1,axis=1)
+    z = np.take(coor_flat,2,axis=1)
+    U = x.reshape((nx,ny,nz))
+    V = y.reshape((nx,ny,nz))
+    W = z.reshape((nx,ny,nz))
+
+    return U, V, W
+
+def rotate_vector(coor_flat,ax,ay,az):
+    """ Rotates vectors by specified angles ax,ay,az 
+    about the x,y,z axes (given in degrees) """
+    
+    # Get rotation matrix
+    mrot = rotation_matrix(ax,ay,az)    
+
+    coor_flat_r = np.zeros_like(coor_flat)
+    
+    # Apply rotation matrix to each M vector
+    for i,M in enumerate(coor_flat):
+        coor_flat_r[i] = mrot.dot(M)
+    
+    return coor_flat_r
+
+def dual_axis_phase_generation(MX,MY,MZ,mesh_params,n_tilt=40, a_range=70,n_pad = 100):
+    """ Returns ax,ay, px,py (angles and phase projections from x and y tilt series)
+    n_tilt = number of projections in each series
+    a_range = maximum tilt angle (applies to both series)
+    n_pad = padding applied during phase calculation (should be > 2x n_px) """
+    angles_x = generate_angles(mode='x',n_tilt=n_tilt,alpha=a_range)
+    angles_y = generate_angles(mode='y',n_tilt=n_tilt,beta=a_range,tilt2='beta')
+    phases_x = generate_phase_data(MX,MY,MZ,angles_x,mesh_params=mesh_params,n_pad=n_pad,unpad=False)
+    phases_y = generate_phase_data(MX,MY,MZ,angles_y,mesh_params=mesh_params,n_pad=n_pad,unpad=False)
+    
+    return angles_x, angles_y, phases_x, phases_y
+
+def dual_axis_B_generation(pxs,pys,mesh_params):
+    """ Returns bxs, bys (projected B fields for tilt series) 
+    Calculates the BX/BY component from the y/x tilt series
+    """
+    # x tilt series --> derivative in x is good --> gives BY
+    p1,p2,n = mesh_params
+        
+    x_size = p2[0]
+    x_res = x_size/n[0]
+    
+    b_const = (constants.codata.value('mag. flux quantum')/(np.pi))
+    bxs = []
+    # calculate b component at each tilt
+    for i in range(np.shape(pxs)[1]):
+        p=pys[:,i,:]
+        # calculate_B_from_phase assumes input is ordered in the wierd way (i.e. flip.T)
+        # but pxs/pys are somehow in the correct orientation, so we need to put them back for this to work
+        # since gradient[0] gives the column gradient and [1] gives the row, so we'll get an incorrect answer
+        p = np.flipud(p).T
+        bx = - b_const*np.gradient(p,x_res)[1]
+        #_,bx,_ = ma.calculate_B_from_phase(p,mesh_params=mesh_params)
+        bxs.append(bx)
+    
+    bys = []
+    # calculate b component at each tilt
+    for i in range(np.shape(pys)[1]):
+        p=pxs[:,i,:]
+        p = np.flipud(p).T
+        by = b_const*np.gradient(p,x_res)[0]
+        #_,_,by = calculate_B_from_phase(p,mesh_params=mesh_params)
+        bys.append(by)
+    
+    # reorder for tomo
+    bxs = np.transpose(bxs,axes=[1,0,2])
+    bys = np.transpose(bys,axes=[1,0,2])
+    
+    return bxs,bys
+
+def dual_axis_reconstruction(xdata,ydata,axs,ays,mesh_params,algorithm = 'SIRT3D_CUDA', niter=100, weight = 0.001,
+                            balance = 1, steps = 'backtrack', callback_freq = 0):
+    """ Perform reconstruction of X/Y components on either phase or magnetic projections from dual axis series """
+    p1,p2,nn=mesh_params
+    resx=p2[0]/nn[0]
+    resy=p2[1]/nn[1]
+
+    # X series reconstruction
+    vecs = generate_vectors(axs)
+    rx = generate_reconstruction(xdata,vecs, algorithm = algorithm, niter=niter, weight = weight,
+                                balance = balance, steps = steps, callback_freq = callback_freq)
+    
+    # Y series reconstruction
+    vecs = generate_vectors(ays)
+    ry = generate_reconstruction(ydata,vecs, algorithm = algorithm, niter=niter, weight =weight,
+                                balance = balance, steps = steps, callback_freq =callback_freq)
+    
+    # Restructure data to match input M/A/B/p
+    rx = np.transpose(rx,axes=(2,1,0))[:,::-1,:]
+    ry = np.transpose(ry,axes=(2,1,0))[:,::-1,:]
+    
+    ry=ry[:,:,::-1]
+    ry= np.transpose(ry[::1,::-1,::1],axes=[1,0,2])
+    
+    rx= np.transpose(rx[::1,::-1,::1],axes=[1,0,2])
+    
+    rx = rx/resx
+    ry = ry/resy
+    
+    
+    return rx,ry
+
+def dual_axis_bz_from_bxby(bx,by):
+    #dz = -1*(np.gradient(bx)[0]+np.gradient(by)[1])
+    bz = []
+    old=0
+    for i in range(np.shape(bx)[2]):
+        dbx = bx[:,:,i]
+        dby = by[:,:,i]
+        dbz = -1*(np.gradient(dbx)[0]+np.gradient(dby)[1])
+        cum = dbz+old
+        bz.append(cum)
+        old=cum    
+    #bz -= np.mean(bz)
+    bz = -np.array(bz)
+    
+    bz = np.transpose(bz,axes=[1,2,0])
+    return bz
+
+def plot_3d_B_slice(bx,by,bz,i_slice=None,mesh_params=None, ax=None,s=5,scale=7,mag_res=0.1, quiver=True, cbar=False,B_contour=True,phase=None,phase_res=np.pi/50):
+    """ Plot projected B field
+    quiver = turn on/off the arrows
+    s = quiver density
+    scale = quiver arrow size
+    B_contour = turn on/off |B| contour lines
+    mag_res = spacing of |B| contour lines in T
+    phase = pass phase shifts to plot phase contours
+    phase_res = spacing of phase contours in radians
+    """
+    if ax == None:
+        fig,ax = plt.subplots()
+    
+    if mesh_params == None:
+        p1 = (0,0,0)
+        sh = np.shape(bx)
+        p2 = (sh[0],sh[1],sh[0])
+        n = p2
+        mesh_params = [p1,p2,n]
+        
+    if type(i_slice) is type(None):
+        i_slice=int(np.shape(bz)[2]/2)
+        
+    bx=copy.deepcopy(bx)
+    by=copy.deepcopy(by)
+    bz=copy.deepcopy(bz)
+        
+    bmax = np.max((bx**2+by**2+bz**2)**0.5)
+    mag_B = ((bx**2+by**2)**0.5)[:,:,i_slice]
+    bx=bx[:,:,i_slice]
+    by=by[:,:,i_slice]
+    bz=bz[:,:,i_slice]
+        
+    
+    p1,p2,n = mesh_params
+    mag_B = np.hypot(bx,by)
+
+    
+
+    # plot BZ a colour
+    # using tan-1(vy/vx)
+    im=ax.imshow(bz.T,origin='lower', 
+               extent=[p1[0], p2[0], p1[1],p2[1]], cmap='RdBu',vmin=-bmax,vmax=bmax)
+    if cbar==True:
+        fig=plt.gcf()
+        fig.subplots_adjust(right=0.8)
+        cbar_ax = fig.add_axes([1, 0.15, 0.01, 0.7])
+        cbar = fig.colorbar(im, cax=cbar_ax)
+        cbar.set_label('$B_z$ / T', rotation=-270,fontsize=15)
+
+    # Plot magnitude of B as in black/transparent scale
+    # Create alpha contour map
+    my_cmap = alpha_cmap()
+    ax.imshow(mag_B.T,origin='lower', 
+               extent=[p1[0], p2[0], p1[1],p2[1]],interpolation='spline16', cmap=my_cmap,alpha=1,vmin=0,vmax=bmax)
+
+    ax.set_xlabel('x / m', fontsize = 16)
+    ax.set_ylabel('y / m', fontsize = 16)
+    
+    # Quiver plot of Bx,By
+    if quiver==True:
+        x = np.linspace(p1[0],p2[0],num=n[0])
+        y = np.linspace(p1[1],p2[1],num=n[1])
+        xs,ys = np.meshgrid(x,y)
+        ax.quiver(xs[::s,::s],ys[::s,::s],bx[::s,::s].T,by[::s,::s].T,color='white',scale=bmax*scale,
+                  pivot='mid',width=0.013,headaxislength=5,headwidth=4,minshaft=1.8,edgecolors='k',lw=.3)
+        
+    
+    # Contour plot of |B|
+    if B_contour==True:
+        mag_range = 2*np.max(mag_B)
+        n_levels = int(mag_range/mag_res)
+        cs = ax.contour(mag_B.T,origin='lower',levels=n_levels, extent=[p1[0], p2[0], p1[1],p2[1]], alpha = .3,colors='white')
+        
+    # Contour plot of phase
+    if type(phase)!=type(None):
+        phase_range = (np.max(phase)-np.min(phase))/1e-9
+        n_levels = int(phase_range/phase_res)
+        cs = ax.contour(phase.T-np.min(phase).T,origin='lower',levels=10, extent=[p1[0], p2[0], p1[1],p2[1]], alpha = .3,colors='white')
+    
+    ax.axis('off')
+    
+def save_B_to_paraview(fpath,bx,by,bz):
+    """ Export B arrays to .vts paraview file
+      
+    Once in paraview:
+    * apply python calculator, in expression put 'make_vector(u,v,w)'
+    * extract subset to desired size
+    * for streamtracer, apply filter or press button. in colorbar select enable opacity to hide small magnitude. use pointcloud seeds for better result
+    * for arrows, apply glyph filter, make sure orientation is 'result'
+
+    """
+    
+    dim = bx.shape
+    x = np.arange(dim[0])
+    y = np.arange(dim[1])
+    z = np.arange(dim[2])
+    X,Y,Z = np.meshgrid(x,y,z,indexing='ij')
+    
+    gridToVTK(fpath,X,Y,Z,pointData={'u':np.ascontiguousarray(bx),'v':np.ascontiguousarray(by),'w':np.ascontiguousarray(bz)})
+    
+def NRMSE(A,B):
+    """ A = ground truth, B = reconstruction"""
+    prefactor = 1/(np.max(A)-np.min(A))
+    abs_diff = np.sum((A-B)**2)
+    N = np.shape(A)[0]*np.shape(A)[1]*np.shape(A)[2]
+    nrmse = prefactor * (1/N*abs_diff)**.5
+    return nrmse
+
+def CC(A,B):
+    """ A = ground truth, B = reconstruction"""
+    N = np.shape(A)[0]*np.shape(A)[1]*np.shape(A)[2]
+    num = N*np.sum(A*B) - np.sum(A)*np.sum(B)
+    denom = ((N*np.sum(A**2)-np.sum(A)**2)*(N*np.sum(B**2)-np.sum(B)**2))**0.5
+    return (num/denom)
+
+def MAAPE(A,B):
+    """ A = ground truth, B = reconstruction, 0 good, 1 bad"""
+    N = np.shape(A)[0]*np.shape(A)[1]*np.shape(A)[2]
+    maape = 1/N*np.sum(np.arctan2(abs((A-B)),abs(A)))
+    return maape
+
+def test_metric(A,B,fun):
+    print('Actual \t',fun(A,A))
+    print('Data \t',fun(A,B))
+    print('Random 1e-10 \t',fun(A,np.zeros_like(B)-(1e-10)*(0.05+0.1*np.random.rand(np.shape(B)[0],np.shape(B)[1],np.shape(B)[2]))))
+    print('Random 1e0 \t',fun(A,np.ones_like(B)-0.05+0.1*np.random.rand(np.shape(B)[0],np.shape(B)[1],np.shape(B)[2])))
+    print('Random 1e10\t',fun(A,1e10*(0.5-np.ones_like(B)*np.random.rand(np.shape(B)[0],np.shape(B)[1],np.shape(B)[2]))))
+    
+def check_memory(g,d):
+    """ Return current RAM use in gigabytes for:
+    - your current python instance (total)
+    - The objects in your current python environment
+    
+    pass in globals() and dir() so it works
+    """
+    import os
+    import psutil
+    import inspect
+    print('--- RAM usage / GB ---')
+    pid = os.getpid()
+    python_process = psutil.Process(pid)
+    memoryUse = python_process.memory_info()[0]/2.**30  # memory use in GB...I think
+    print('Total:\t %.3f' % memoryUse)
+    
+    # These are the usual ipython objects, including this one you are creating
+    ipython_vars = ['In', 'Out', 'exit', 'quit', 'get_ipython', 'ipython_vars']
+
+    # Get a sorted list of the objects and their sizes
+    mems = sorted([(x, sys.getsizeof(g.get(x))) for x in d], key=lambda x: x[1], reverse=True)
+    vals = np.sum(np.array(mems)[:,1].astype('float32'))/1e9
+    print('Local:\t %.3f' %vals)
+    
+def plot_B_series(bx,by,bz,slices=None):
+    fig,axs=plt.subplots(ncols=len(slices),figsize=(15,3))
+    for i,i_slice in enumerate(slices):
+        if i == len(slices)-1:
+            plot_3d_B_slice(bx,by,bz,ax=axs[i],i_slice=i_slice,cbar=True)
+        else:
+            plot_3d_B_slice(bx,by,bz,ax=axs[i],i_slice=i_slice)
+        
+    plt.tight_layout()
